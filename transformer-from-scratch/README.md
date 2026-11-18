@@ -106,3 +106,47 @@ Training-mode dropout randomly zeros features and rescales the survivors. In eva
 | `decoder_input_ids [B, T]` | `decoder_x [B, T, d_model]` |
 
 Phase 3 self-attention will receive these position-aware vectors and the corresponding Phase 1 boolean masks. Use the encoder mask with `encoder_x` and the causal decoder mask with `decoder_x`. The embedding modules leave the batch's masks and shifted decoder labels untouched.
+
+## Phase 3 · Scaled dot-product attention
+
+After preparing the Phase 1 data, run:
+
+```bash
+python scripts/inspect_attention.py
+python -m pytest -q
+```
+
+The inspector shows scaled scores, allowed keys, probabilities and gradient norms on a real batch. It uses evaluation mode so dropout is disabled. Use `--split val` or `--split test` to inspect another split.
+
+### How one head builds context
+
+A query describes what a token is looking for. A key describes what a candidate token can match against, and a value carries the information that candidate contributes. Three independent, bias-free linear projections produce Q, K and V. They start with random weights, which a future training objective can adjust.
+
+The dot product between each query and key measures how strongly their projected features align. Divide each score by `sqrt(d_k)` to keep typical logits from growing with the feature dimension and pushing softmax toward saturation. Mask blocked keys before softmax. Softmax converts the allowed scores into a probability distribution across keys, separately for each query. Multiplying those probabilities by V builds a weighted sum of the candidate values. The result is contextual because it depends on the other tokens the query can attend to. [Attention Is All You Need, §3.2.1](https://arxiv.org/abs/1706.03762)
+
+During training, attention dropout randomly drops and rescales some probabilities before multiplying by V. This regularizes how the head combines information across keys. The dropped and rescaled weights need not sum to one. When requested with `return_weights=True`, the module returns the original pre-dropout probabilities, which sum to one for each row with an allowed key.
+
+### Inputs, shapes and masks
+
+| Quantity | Shape |
+| --- | --- |
+| Projected Q | `[B, H, Tq, d_k]` |
+| Projected K | `[B, H, Tk, d_k]` |
+| Projected V | `[B, H, Tk, d_v]` |
+| Scores and probabilities | `[B, H, Tq, Tk]` |
+| Scaled-attention context | `[B, H, Tq, d_v]` |
+| Single-head context | `[B, Tq, head_dim]` |
+
+`Tq` and `Tk` count query and key positions, respectively. `SingleAttentionHead` takes input embeddings of width `d_model`, sets `H=1` and uses `head_dim` for both projected feature sizes. It removes the singleton head axis from the context and retains it in the optional probabilities. The default `head_dim` is `256 / 4 = 64`, derived from the divisible model width and configured head count. `attention_dropout` in the model config controls probability dropout separately from embedding dropout.
+
+- **Encoder self-attention** uses encoder embeddings for Q, K and V. The mask `[B, 1, 1, S]` lets source queries see all valid source keys.
+- **Decoder self-attention** uses decoder embeddings for Q, K and V. The mask `[B, 1, T, T]` also blocks future keys. For four non-padding positions the rows are `TFFF`, `TTFF`, `TTTF` and `TTTT`.
+- **Cross-attention** uses decoder embeddings for Q and encoder embeddings for K and V. The mask `[B, 1, T, S]` allows valid source keys, and source and target lengths can differ.
+
+All three modes reuse the Phase 1 masks. `True` allows attention and `False` blocks it. Masking padding keys keeps padding from consuming any probability mass. A fully masked query has zero probabilities and zero context. A padded query can still have nonzero context if the mask allows keys for that row.
+
+### Worked example
+
+Take Q and K both equal to the two-by-two identity and use value rows `[1, 2]` and `[3, 4]`. Then `QKᵀ` is the identity. Dividing by `sqrt(2)` makes each diagonal logit approximately 0.7071. With no mask, row-wise softmax yields `[p, 1-p]` and `[1-p, p]`, where `p = exp(1/sqrt(2)) / (1 + exp(1/sqrt(2))) ≈ 0.6698`. The first context is `p × [1, 2] + (1-p) × [3, 4] ≈ [1.6605, 2.6605]`. The second is approximately `[2.3395, 3.3395]`. Tests check both rows and compare the general implementation with PyTorch’s optimized reference.
+
+Phase 4 will project four independent 64-dimensional heads, apply the same attention calculation to all heads, concatenate their contexts to width 256 and apply a learned output projection.
