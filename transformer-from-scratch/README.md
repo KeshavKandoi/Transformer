@@ -149,4 +149,28 @@ All three modes reuse the Phase 1 masks. `True` allows attention and `False` blo
 
 Take Q and K both equal to the two-by-two identity and use value rows `[1, 2]` and `[3, 4]`. Then `QKᵀ` is the identity. Dividing by `sqrt(2)` makes each diagonal logit approximately 0.7071. With no mask, row-wise softmax yields `[p, 1-p]` and `[1-p, p]`, where `p = exp(1/sqrt(2)) / (1 + exp(1/sqrt(2))) ≈ 0.6698`. The first context is `p × [1, 2] + (1-p) × [3, 4] ≈ [1.6605, 2.6605]`. The second is approximately `[2.3395, 3.3395]`. Tests check both rows and compare the general implementation with PyTorch’s optimized reference.
 
-Phase 4 will project four independent 64-dimensional heads, apply the same attention calculation to all heads, concatenate their contexts to width 256 and apply a learned output projection.
+## Phase 4 · Multi-head attention
+
+Inspect a real batch in evaluation mode after preparing the Phase 1 data.
+
+```bash
+python scripts/inspect_multi_head_attention.py
+python scripts/inspect_multi_head_attention.py --split val
+python scripts/inspect_multi_head_attention.py --split test
+```
+
+Each head sees the full query and key/value sequences at width `d_model`. Independent Q, K and V projections let heads learn different ways to compare tokens and combine information. The default model uses four heads, so each projects 256 input features to `head_dim = 256 / 4 = 64`. Each head runs the same Phase 3 attention calculation.
+
+The four contexts have shape `[B, Tq, 64]`. Concatenating along the feature axis preserves all four contexts in their head order and gives `[B, Tq, 256]`. The learned, bias-free `W_o` mixes features across heads and returns `[B, Tq, 256]`. Matching the input width will let Phase 5 add the attention result to the sublayer input. With the default settings, Q/K/V contribute `3 × 4 × 256 × 64` parameters and `W_o` adds `256 × 256`, for **262,144 trainable parameters per module**.
+
+| Attention mode | Queries | Keys and values | Phase 1 mask | Output | Optional probabilities |
+| --- | --- | --- | --- | --- | --- |
+| Encoder self-attention | Encoder input | Encoder input | `[B, 1, 1, S]` | `[B, S, 256]` | `[B, 4, S, S]` |
+| Decoder causal self-attention | Decoder input | Decoder input | `[B, 1, T, T]` | `[B, T, 256]` | `[B, 4, T, T]` |
+| Decoder-to-encoder cross-attention | Decoder input | Encoder input | `[B, 1, T, S]` | `[B, T, 256]` | `[B, 4, T, S]` |
+
+The singleton head axis of each Phase 1 mask broadcasts the same rules to every head. Encoder self-attention allows valid source keys. Decoder self-attention also blocks future target positions. Cross-attention lets each decoder query see valid source keys even when `S` and `T` differ. A mask with an explicit head dimension can assign different allowed keys per head. `True` allows attention. Fully masked rows across all heads stay zero through `W_o` because its bias is absent.
+
+Use separate instances for the three roles so each learns its own projections. Pass only `query_input` for self-attention and additionally pass `key_value_input` for cross-attention. By default the call returns the projected context. Pass `return_attention_weights=True` to receive `(context, probabilities)`. The probabilities are from before dropout. During training, `attention_dropout` applies once to the probabilities used to compute each head's context.
+
+Phase 5 can call the module with the position-aware input vectors and the matching boolean mask, then use its `[B, Tq, d_model]` context in the residual path and normalization.
