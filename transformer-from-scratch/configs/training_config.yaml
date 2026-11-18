@@ -1,0 +1,27 @@
+training:
+  epochs: 20
+  batch_size: 8
+  gradient_accumulation_steps: 1
+  seed: 42
+  device: auto
+  optimizer:
+    type: adamw
+    learning_rate: 0.0003
+    beta1: 0.9
+    beta2: 0.98
+    epsilon: 0.000000001
+    weight_decay: 0.01
+  scheduler:
+    type: inverse_sqrt
+    warmup_steps: 100
+  max_grad_norm: 1.0
+  label_smoothing: 0.0
+  validation_frequency: 1
+  checkpoint_frequency: 1
+  early_stopping:
+    enabled: true
+    patience: 5
+    min_delta: 0.0
+  logging:
+    log_every_steps: 10
+  mixed_precision: false
