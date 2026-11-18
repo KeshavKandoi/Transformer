@@ -48,3 +48,7 @@ Review split sizes, rejected rows, largest duplicate cluster and tokenized lengt
 ```
 
 Choose the checkpoint and decoding settings on validation data before final test evaluation. For a quick pipeline check, use `scripts/import_corpus.py --demo --output experiments/en-hi-corpus-smoke-v1` with a fresh run name and a small CPU budget. The bundled pairs are smoke data. Translation quality requires a separate licensed corpus and an explicitly chosen training budget.
+
+## IIT Bombay fixed-split experiment
+
+For local noncommercial research, follow the [pinned IIT Bombay workflow](transformer-from-scratch/README.md#iit-bombay-englishhindi-fixed-split-experiment). It downloads published Parquet files explicitly, preserves official split membership, and keeps downloaded text, checkpoints, and private reports under ignored paths. CFILT declares CC BY-NC 4.0 and states that compiled sources have their own licenses. [CFILT publisher page](https://www.cfilt.iitb.ac.in/iitb_parallel/) · [Pinned Hugging Face revision](https://huggingface.co/datasets/cfilt/iitb-english-hindi/tree/e104eb47979d570d3df7af4912da85f83efde6fc)

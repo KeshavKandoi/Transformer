@@ -471,3 +471,82 @@ The default experimental inverse-square-root schedule warms up for 10% of planne
 `scripts/evaluate_translations.py` scores **generated** translations on validation or explicitly selected test rows using corpus chrF2 and international-tokenized BLEU. It saves metric signatures, raw predictions and references, EOS flags, and checkpoint fingerprints. With `--training-metrics runs/<run>/metrics.jsonl` it also exports `training_curves.csv` through the evaluated checkpoint epoch. Run-level JSONL retains all completed epochs. Use the same text and decode settings when comparing checkpoints. `--limit` produces a clearly marked subset report. [SacreBLEU metric documentation](https://github.com/mjpost/sacrebleu)
 
 Run `python -m pytest tests/test_corpus_experiment.py -q` for quality, leakage, metrics, EOS and the local-corpus train/evaluate integration checks.
+
+## IIT Bombay English–Hindi fixed-split experiment
+
+The acquisition script defaults to CFILT's IIT Bombay English–Hindi Parallel Corpus, publisher version 3.1, and the exact Hugging Face revision `e104eb47979d570d3df7af4912da85f83efde6fc`. The published Parquet files at that revision contain 1,659,083 train, 520 validation, and 2,507 test rows with `translation.en` and `translation.hi` strings. The publisher's version table lists one fewer training segment. The acquisition manifest records the Parquet counts and file hashes. [CFILT publisher page](https://www.cfilt.iitb.ac.in/iitb_parallel/) · [Pinned Parquet files](https://huggingface.co/datasets/cfilt/iitb-english-hindi/tree/e104eb47979d570d3df7af4912da85f83efde6fc/data)
+
+CFILT lists **CC BY-NC 4.0** and says texts compiled from other sources retain their respective licenses. The Hugging Face card does not independently list a license. Use the artifacts for local noncommercial research. Review each applicable license before redistributing text, predictions, or model checkpoints. Cite Anoop Kunchukuttan, Pratik Mehta and Pushpak Bhattacharyya, *The IIT Bombay English-Hindi Parallel Corpus*, LREC 2018. [Publisher license](https://www.cfilt.iitb.ac.in/iitb_parallel/#license) · [Corpus paper](https://aclanthology.org/L18-1548/)
+
+### Acquire and prepare
+
+```bash
+pilot=experiments/iitb-pilot-v1
+revision=e104eb47979d570d3df7af4912da85f83efde6fc
+HF_HUB_DISABLE_XET=1 .venv/bin/python scripts/download_iitb_dataset.py \
+  --dataset cfilt/iitb-english-hindi --revision "$revision" \
+  --train-samples 10000 --seed 42 --output "$pilot/source"
+.venv/bin/python scripts/prepare_iitb_experiment.py \
+  --source-dir "$pilot/source" --output "$pilot" --data-config configs/experiment_data.yaml
+```
+
+The downloader stores only the three published Parquet files in a local Hub cache and reads them in batches. It scans the entire train split using a seed-based reservoir and writes selected rows in original order. Replay with `--offline` and the same SHA and seed, using a new experiment source directory under the same cache parent. The output is private and ignored by Git. `--force` explicitly replaces a complete acquisition output. No remote Python dataset loader runs.
+
+Preparation reuses the existing Unicode, language and ratio filters. Exact and near-duplicate connected groups use **test, then validation, then train** priority. Members removed from a lower-priority split are discarded. Rows never move between official splits. Repeated keys and near-duplicate groups are boilerplate indicators, and word-count ratios flag suspicious alignment. Review the private length-stratified `processed/alignment_audit.jsonl` to inspect actual translations. Post-BPE overlength rows are excluded and counted per split, with raw source CSVs available for authorized audit. BPE is refitted if training exclusions change its fitting rows, so the final tokenizer can be reproduced from final `train.csv` alone. Evaluation references are never clipped.
+
+The seed-42 pilot retained 8,633 train, 494 validation, and 2,163 test rows. Of 10,000 selected train rows, 109 were invalid or exact duplicates in the CSV, 701 failed quality filters, and 557 exceeded token limits after BPE. The duplicate index found 194 multi-pair groups, with six distinct pairs in the largest and zero cross-split groups at a 0.8 trigram Jaccard threshold. Semantic paraphrases can evade this index. Official test preparation retained 86.28% of records. Consider jointly increasing the data and model sequence limits if evaluating a higher share of the official test set.
+
+### CPU dry-run, pilot training and resume
+
+```bash
+.venv/bin/python scripts/train.py --config configs/iitb_pilot_training.yaml \
+  --model-config configs/iitb_pilot_model.yaml --data-config configs/experiment_data.yaml \
+  --processed-dir "$pilot/processed" --tokenizer-dir "$pilot/tokenizer" \
+  --run-name iitb-pilot-v1 --device cpu --dry-run
+
+# Run only after selecting a compute and epoch budget.
+.venv/bin/python scripts/train.py --config configs/iitb_pilot_training.yaml \
+  --model-config configs/iitb_pilot_model.yaml --data-config configs/experiment_data.yaml \
+  --processed-dir "$pilot/processed" --tokenizer-dir "$pilot/tokenizer" \
+  --run-name iitb-pilot-v1 --device cpu --epochs 1 --planned-epochs 5
+
+.venv/bin/python scripts/train.py --resume checkpoints/iitb-pilot-v1/latest.pt \
+  --model-config configs/iitb_pilot_model.yaml --data-config configs/experiment_data.yaml \
+  --processed-dir "$pilot/processed" --tokenizer-dir "$pilot/tokenizer" --device cpu --epochs 5
+```
+
+The pilot is width 128 with two encoder layers, two decoder layers, four heads, a 512-wide FFN and a 128-token positional limit. The independent `iitb_full_*.yaml` configs use width 256, four layers per stack and a 1024-wide FFN. For a 50,000-row selection, acquire a new source with `--train-samples 50000`, prepare a separate experiment and review its dry-run before selecting a compute budget. The pilot's 8,000-token BPE gives 3,994,624 trainable parameters and logits shaped `[batch, target_length, 8000]`. The measured CPU dry-run used `[8, 117, 8000]`.
+
+The checkpoint stores state dictionaries, optimizer and scheduler counters, seed and RNG state, resolved settings and tokenizer/config/corpus fingerprints. Reuse the same processed data and tokenizer after resume. Exact continuation is tested on CPU at an epoch boundary. On the Apple M1 Pro, a one-batch MPS check passed with `deterministic_algorithms: false`. The strict setting failed because this PyTorch build lacks deterministic `embedding_dense_backward_mps`. Use CPU for strict reproduction or record the MPS override in a separate training config. Keep the environment versions, raw manifest and prepared artifacts together.
+
+### Held-out generation and audit
+
+```bash
+.venv/bin/python scripts/evaluate_translations.py --checkpoint checkpoints/iitb-pilot-v1/best.pt \
+  --processed-dir "$pilot/processed" --tokenizer-dir "$pilot/tokenizer" \
+  --split val --output runs/iitb-pilot-v1/generated-validation \
+  --training-metrics runs/iitb-pilot-v1/metrics.jsonl
+
+.venv/bin/python scripts/audit_translation_experiment.py --source-dir "$pilot/source" \
+  --experiment "$pilot" --checkpoint checkpoints/iitb-pilot-v1/best.pt \
+  --run-dir runs/iitb-pilot-v1 --generation runs/iitb-pilot-v1/generated-validation
+```
+
+For final test evaluation after freezing the checkpoint and decoding settings, use the same evaluation command with `--split test --output runs/iitb-pilot-v1/generated-test`. Corpus chrF2 compares character n-grams and weighs recall twice as much as precision. Corpus BLEU measures token n-gram precision with a brevity penalty. The JSON report includes metric signatures, original and evaluated row counts, exclusion reasons, EOS counts, repetition and control-character flags, and generation timing.
+
+A separate CPU smoke run used a seeded 256-row pre-length training sample and retained 238 train and 490 validation examples. It reached 30 optimizer updates after two epochs, with three warmup updates and a 3,992-token vocabulary. The run's 24 length-stratified validation generations repeated a Devanagari vowel mark, with zero EOS completions and zero BLEU for both strategies. The private audit report includes 20 varied examples. The full 10,000-selected pilot was prepared and passed its dry-run. Its training and official test evaluation are pending a selected budget and frozen model.
+
+
+To prepare a separate larger run after choosing a compute budget, use the same pinned revision and retain its own source, tokenizer and checkpoints.
+
+```bash
+larger=experiments/iitb-50k-v1
+HF_HUB_DISABLE_XET=1 .venv/bin/python scripts/download_iitb_dataset.py --revision "$revision" \
+  --train-samples 50000 --seed 42 --output "$larger/source"
+.venv/bin/python scripts/prepare_iitb_experiment.py --source-dir "$larger/source" \
+  --output "$larger" --data-config configs/experiment_data.yaml
+.venv/bin/python scripts/train.py --config configs/iitb_full_training.yaml \
+  --model-config configs/iitb_full_model.yaml --data-config configs/experiment_data.yaml \
+  --processed-dir "$larger/processed" --tokenizer-dir "$larger/tokenizer" \
+  --run-name iitb-50k-v1 --device cpu --dry-run
+```
