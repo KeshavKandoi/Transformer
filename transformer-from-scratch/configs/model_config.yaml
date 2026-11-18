@@ -13,5 +13,4 @@ model:
 
   num_encoder_layers: 4
 
-  # Reserved for the decoder phase.
   num_decoder_layers: 4

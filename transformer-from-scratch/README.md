@@ -268,3 +268,51 @@ python -m pytest -q -rs
 ```
 
 The inspector defaults to CPU and accepts `--device cuda` or `--device mps` when available. It prints a small attention map from each layer, verifies padding and gradients, and checks one temporary AdamW update and a state-dictionary round-trip.
+
+## Phase 7 · Transformer decoder
+
+The decoder builds one contextual vector for each target input position. During teacher forcing, Phase 1 supplies gold target tokens shifted right. For example, the input `<bos> हम दोस्त हैं` aligns with labels `हम दोस्त हैं <eos>`. Each decoder position can see the gold prefix needed to predict the next token. Pass `decoder_input_ids` to the decoder and save `decoder_target_ids` for the later loss. Feeding the labels directly would expose the token the model is supposed to predict.
+
+Four independent post-norm blocks refine the target states in sequence. Each block has three distinct Add & Norm operations because each of its three sublayers adds its result to the sublayer input before applying its own normalization.
+
+1. **Masked self-attention** takes Q, K and V from decoder states. A target query can attend to its own position and earlier valid positions. Future keys are blocked, so changing future IDs leaves shared-prefix representations unchanged. Encoder self-attention is bidirectional because the complete source is available.
+2. **Cross-attention** takes Q from the post-normalized decoder state because each target position is looking for relevant source information. K and V come from encoder memory and describe the source positions being searched and combined. This sublayer learns separate projections from masked self-attention.
+3. **Position-wise FFN** expands each target vector from 256 to 1024 features, applies ReLU and hidden dropout, then projects back to 256 for the residual addition.
+
+```python
+from src.model.decoder import TransformerDecoder
+
+decoder = TransformerDecoder(tokenizer.vocab_size, tokenizer.pad_id, model_config)
+memory = encoder(batch["encoder_input_ids"], batch["encoder_attention_mask"])
+states, self_maps, cross_maps = decoder(
+    decoder_input_ids=batch["decoder_input_ids"],
+    encoder_memory=memory,
+    decoder_attention_mask=batch["decoder_attention_mask"],
+    cross_attention_mask=batch["cross_attention_mask"],
+    return_attention_weights=True,
+)
+```
+
+The decoder derives the causal target key-padding mask from its input IDs. An explicit self-attention mask can further restrict allowed keys. Supply the cross-attention mask from the source IDs, which are where source padding is known. If source and target lengths differ, shape validation catches a swapped pair of standard masks. With equal lengths, shape alone cannot identify which mask is which. The decoder still enforces causality on its self-attention input.
+
+Both masks use `True` for allowed keys. Padded target queries are zeroed after each residual normalization. Fully masked attention rows have zero probabilities and zero attention context. The residual path can still carry the input at a valid query. The encoder rejects entirely padded source examples, and the decoder rejects entirely padded target examples.
+
+| Quantity | General shape | Training batch |
+| --- | --- | --- |
+| Shifted decoder IDs | `[B, T]` | `[8, 16]` |
+| Encoder memory | `[B, S, d_model]` | `[8, 6, 256]` |
+| Decoder embeddings and each block output | `[B, T, d_model]` | `[8, 16, 256]` |
+| Self-attention maps | `[B, layers, heads, T, T]` | `[8, 4, 4, 16, 16]` |
+| Cross-attention maps | `[B, layers, heads, T, S]` | `[8, 4, 4, 16, 6]` |
+
+Maps show pre-dropout probabilities in `[batch, layer, head, query, key]` order. Omit the return flag to receive just the final decoder states. Phase 8 will project those states to vocabulary logits and align those logits with the existing shifted labels.
+
+```bash
+python scripts/inspect_decoder.py
+python scripts/inspect_decoder.py --split val
+python scripts/inspect_decoder.py --split test
+python -m pytest tests/test_decoder_*.py tests/test_cross_attention_integration.py -q
+python -m pytest -q -rs
+```
+
+The inspector defaults to CPU and accepts `--device cuda` or `--device mps` when available. It prints a small map from each layer and runs one temporary optimizer step and a state-dictionary round-trip.
