@@ -73,7 +73,8 @@ def run(args: argparse.Namespace) -> None:
     def train_loader(epoch: int):
         return data.loader("train", config.batch_size, (config.seed + epoch) % 2**63, shuffle=True)
 
-    LOGGER.info("Batches per epoch=%d optimizer updates per epoch=%d", batches, updates_per_epoch)
+    LOGGER.info("Batches per epoch=%d optimizer updates per epoch=%d effective batch ceiling=%d",
+                batches, updates_per_epoch, config.batch_size * config.gradient_accumulation_steps)
     if args.dry_run:
         if resume is not None:
             raise ValueError("--dry-run cannot be combined with --resume")
@@ -82,6 +83,19 @@ def run(args: argparse.Namespace) -> None:
         loss, count = masked_cross_entropy(logits, labels, data.tokenizer.pad_id, config.label_smoothing)
         (loss / count).backward()
         norm = torch.nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm, error_if_nonfinite=True)
+        groups = ("encoder.embedding", "encoder.stack.layers.0.self_attention", "encoder.stack.layers.0.feed_forward",
+                  "decoder.embedding", "decoder.stack.layers.0.masked_self_attention",
+                  "decoder.stack.layers.0.cross_attention", "decoder.stack.layers.0.feed_forward", "output_projection")
+        parameters = list(model.named_parameters())
+        for group in groups:
+            gradients = [parameter.grad for name, parameter in parameters
+                         if name.startswith(group + ".") and parameter.requires_grad]
+            if not gradients or any(gradient is None for gradient in gradients):
+                raise ValueError(f"Dry-run missing gradient in {group}")
+            gradient_norm = torch.stack([gradient.norm() for gradient in gradients]).norm().item()
+            if not math.isfinite(gradient_norm) or not gradient_norm > 0:
+                raise ValueError(f"Dry-run invalid gradient norm in {group}: {gradient_norm}")
+            LOGGER.info("Dry-run clipped gradient norm %s=%.6f", group, gradient_norm)
         LOGGER.info("Dry-run forward/backward passed: logits=%s loss=%.6f tokens=%d preclip_norm=%.6f",
                     tuple(logits.shape), loss.item() / count, count, norm.item())
         return

@@ -5,7 +5,10 @@ import csv
 import json
 import sys
 import tempfile
+import time
+import unicodedata
 from dataclasses import asdict
+from itertools import groupby
 from pathlib import Path
 
 from sacrebleu.metrics import BLEU, CHRF
@@ -53,6 +56,19 @@ def export_curves(metrics_path: Path, destination: Path, checkpoint: dict) -> No
                              train["learning_rate"], train["gradient_norm"]))
 
 
+def prediction_flags(text: str) -> dict[str, bool]:
+    words = text.split()
+    return {
+        "empty": not text.strip(),
+        "repetition": any(sum(1 for _ in repeat) >= 4 for char, repeat in groupby(text) if not char.isspace())
+        or any(sum(1 for _ in repeat) >= 3 for _, repeat in groupby(words)),
+        "control": any(unicodedata.category(char) == "Cc" or
+                       (unicodedata.category(char) == "Cf" and char not in "\u200c\u200d") for char in text),
+        "replacement_character": "\ufffd" in text,
+        "devanagari_letters": any(char.isalpha() and "DEVANAGARI" in unicodedata.name(char, "") for char in text),
+    }
+
+
 def evaluate(args: argparse.Namespace) -> dict:
     if args.output.exists():
         raise ValueError(f"Output already exists: {args.output}; choose a fresh directory")
@@ -64,10 +80,26 @@ def evaluate(args: argparse.Namespace) -> dict:
     translator = TransformerTranslator.from_checkpoint(args.checkpoint, args.tokenizer_dir, args.device)
     validate_checkpoint(checkpoint, asdict(translator.model.config), data.tokenizer_metadata, data.data_identity)
     pairs, _ = read_parallel_csv(args.processed_dir / f"{args.split}.csv")
-    pairs = pairs[:args.limit]
+    if args.limit is not None and args.limit < len(pairs) and getattr(args, "stratified", False):
+        ordered = sorted(pairs, key=lambda pair: (len(pair.source), pair.source, pair.target))
+        indices = [round((len(ordered) - 1) * i / max(1, args.limit - 1)) for i in range(args.limit)]
+        pairs = [ordered[index] for index in indices]
+    else:
+        pairs = pairs[:args.limit]
     references = [pair.target for pair in pairs]
+    corpus = checkpoint["data_identity"].get("corpus", {})
+    official = corpus.get("splits", {}).get(args.split)
+    prepared_count = len(data.datasets[args.split])
+    original_count = official["rows"] if official else prepared_count
     report = {
-        "split": args.split, "examples": len(pairs), "full_split": len(pairs) == len(data.datasets[args.split]),
+        "split": args.split, "examples": len(pairs), "full_split": len(pairs) == prepared_count,
+        "official_split_examples": original_count, "prepared_examples": prepared_count,
+        "official_coverage": len(pairs) / original_count,
+        "excluded_by_preparation": original_count - prepared_count,
+        "omitted_by_evaluation_limit": prepared_count - len(pairs),
+        "dataset_revision": corpus.get("source", {}).get("revision"),
+        "preparation_stats": official, "leakage_removed": corpus.get("leakage", {}).get("removed", {}).get(args.split),
+        "model_config": asdict(translator.model.config), "tokenizer_sha256": data.tokenizer_metadata["tokenizer_sha256"],
         "checkpoint_sha256": file_digest(args.checkpoint), "experiment_fingerprints": experiment_fingerprints(checkpoint),
         "device": str(translator.device), "batch_size": args.batch_size, "strategies": {},
     }
@@ -80,6 +112,8 @@ def evaluate(args: argparse.Namespace) -> dict:
                                      length_penalty=args.length_penalty, device=args.device)
             hypotheses = []
             completed = 0
+            flag_counts: dict[str, int] = {}
+            started = time.perf_counter()
             with (staging / f"{strategy}.jsonl").open("w", encoding="utf-8") as stream:
                 for start in range(0, len(pairs), args.batch_size):
                     rows = pairs[start:start + args.batch_size]
@@ -87,13 +121,18 @@ def evaluate(args: argparse.Namespace) -> dict:
                     for row, result in zip(rows, results, strict=True):
                         hypotheses.append(result.text)
                         completed += result.hypothesis.reached_eos
+                        flags = prediction_flags(result.text)
+                        for flag, present in flags.items():
+                            flag_counts[flag] = flag_counts.get(flag, 0) + int(present)
                         stream.write(json.dumps({
                             "source": row.source, "reference": row.target, "prediction": result.text,
                             "reached_eos": result.hypothesis.reached_eos,
-                            "generated_tokens": len(result.hypothesis.token_ids),
+                            "generated_tokens": len(result.hypothesis.token_ids), "flags": flags,
                         }, ensure_ascii=False) + "\n")
+            seconds = time.perf_counter() - started
             report["strategies"][strategy] = {
                 **score_translations(hypotheses, references), "eos_count": completed, "config": asdict(config),
+                "generation_seconds": seconds, "prediction_flags": flag_counts,
             }
         if args.training_metrics is not None:
             export_curves(args.training_metrics, staging / "training_curves.csv", checkpoint)
@@ -113,6 +152,7 @@ def main() -> None:
     parser.add_argument("--training-metrics", type=Path, help="Matching run metrics JSONL to export curves through the checkpoint epoch")
     parser.add_argument("--split", choices=("val", "test"), default="val")
     parser.add_argument("--limit", type=int)
+    parser.add_argument("--stratified", action="store_true", help="Spread a limited sample across source lengths")
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--max-new-tokens", type=int, default=64)
     parser.add_argument("--beam-width", type=int, default=4)
