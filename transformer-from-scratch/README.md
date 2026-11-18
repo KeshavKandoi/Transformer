@@ -229,3 +229,42 @@ The FFN applies hidden dropout after ReLU and before its second linear layer. Ea
 ### Phase 6 interface
 
 An encoder block can call `MultiHeadAttention` with the source representations and encoder key mask, use `ResidualAddNorm(x, attention_output, token_valid_mask)`, pass that result through `PositionwiseFeedForward`, and apply a second independent `ResidualAddNorm` using the same token-validity mask. The resulting `[B, S, d_model]` tensor can feed the next encoder block.
+
+## Phase 6 · Transformer encoder
+
+The encoder turns source IDs into contextual vectors, one per source position. It applies the existing token embeddings, sinusoidal positions and embedding dropout, then passes the result through four independent encoder blocks by default. Each block refines the preceding block's representation with self-attention and a position-wise feed-forward network.
+
+Inside an encoder block, the same source sequence supplies the inputs to the Q, K and V projections. Self-attention is bidirectional because all source tokens are available when encoding. An earlier source query may attend to a later valid source key, so the encoder uses no causal mask by default. Four independently learned heads can capture different relations in parallel. Their 64-feature contexts concatenate to width 256, then the learned output projection mixes features across heads and preserves the width required by the residual addition.
+
+Each block applies the post-norm ordering from Phase 5. One custom LayerNorm follows the residual addition around attention. An independent LayerNorm follows the residual addition around the FFN. The FFN adds a nonlinear transformation for each token, expanding its features to 1024 with ReLU and projecting back to 256. The next block receives the resulting vectors.
+
+| Stage | Observed training batch |
+| --- | --- |
+| Source IDs | `[8, 6]` |
+| Embeddings | `[8, 6, 256]` |
+| Blocks 1–4, each output | `[8, 6, 256]` |
+| Final encoder memory | `[8, 6, 256]` |
+| Optional attention maps | `[8, 4, 4, 6, 6]` |
+
+```python
+encoder = TransformerEncoder(tokenizer.vocab_size, tokenizer.pad_id, model_config)
+memory, maps = encoder(
+    source_ids=batch["encoder_input_ids"],
+    attention_mask=batch["encoder_attention_mask"],
+    return_attention_weights=True,
+)
+```
+
+Import `TransformerEncoder` from `src.model.encoder` and load `model_config` with `ModelConfig.load`. Omit the return flag for memory alone. The returned maps contain pre-dropout probabilities with axes `[batch, layer, head, query, key]`. Omit the explicit attention mask to derive the padding mask from source IDs. A supplied boolean mask may restrict more keys and is intersected with the ID-derived key mask, so padding keys remain blocked. A separate token-validity mask zeros padded query vectors after each residual normalization. Empty source examples and rows containing only padding raise a validation error.
+
+For Phase 7, retain the source padding mask and pass the memory as the key/value input to decoder cross-attention. Decoder representations supply queries, and the Phase 1 cross-attention mask broadcasts across heads with source and target lengths that can differ. Encoder memory retains its computation graph for end-to-end gradients.
+
+```bash
+python scripts/inspect_encoder.py
+python scripts/inspect_encoder.py --split val
+python scripts/inspect_encoder.py --split test
+python -m pytest tests/test_encoder_*.py -q
+python -m pytest -q -rs
+```
+
+The inspector defaults to CPU and accepts `--device cuda` or `--device mps` when available. It prints a small attention map from each layer, verifies padding and gradients, and checks one temporary AdamW update and a state-dictionary round-trip.
