@@ -16,6 +16,15 @@ class ModelConfig:
     num_decoder_layers: int = 4
     d_ff: int = 1024
     attention_dropout: float = 0.1
+    layer_norm_eps: float = 1e-5
+    normalization_style: str = "post_norm"
+    ffn_activation: str = "relu"
+
+    def validate_sublayer_settings(self) -> None:
+        if self.normalization_style != "post_norm":
+            raise ValueError("model.normalization_style must be post_norm")
+        if self.ffn_activation != "relu":
+            raise ValueError("model.ffn_activation must be relu")
 
     @property
     def head_dim(self) -> int:
