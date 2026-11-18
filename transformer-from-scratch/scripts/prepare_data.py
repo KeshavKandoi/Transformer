@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.data.cleaning import read_parallel_csv, split_pairs, write_parallel_csv
 from src.data.config import ROOT, DataConfig, data_parser
+from src.data.prepared import write_preparation_manifest
 from src.data.tokenizer import BilingualBPETokenizer
 
 
@@ -32,6 +33,7 @@ def prepare(args: argparse.Namespace) -> None:
             split, len(split_rows), len({pair.source for pair in split_rows}), path,
         )
     tokenizer.save(args.tokenizer_dir)
+    write_preparation_manifest(args.processed_dir, args.tokenizer_dir, args.input, config)
     logging.info("Saved vocabulary of %d tokens to %s", tokenizer.vocab_size, args.tokenizer_dir)
 
 
