@@ -4,6 +4,7 @@ import argparse
 import json
 import logging
 import math
+import os
 import sys
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
@@ -18,8 +19,9 @@ from src.data.config import ROOT, DataConfig
 from src.model.config import ModelConfig
 from src.model.transformer import EncoderDecoderTransformer
 from src.training.checkpoint import CheckpointManager, load_checkpoint
-from src.training.config import TrainingConfig
+from src.training.config import SchedulerConfig, TrainingConfig
 from src.training.loss import masked_cross_entropy
+from src.training.scheduler import resolve_schedule
 from src.training.trainer import TransformerTrainer
 from src.training.utils import add_data_arguments, forward_batch, load_prepared_data, seed_everything, select_device
 
@@ -40,7 +42,21 @@ def run(args: argparse.Namespace) -> None:
     data_config = DataConfig.load(args.data_config)
     model_config.validate_sequence_lengths(data_config.max_source_length, data_config.max_target_length)
     data = load_prepared_data(args.processed_dir, args.tokenizer_dir, data_config)
+    if config.deterministic_algorithms:
+        os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+        torch.use_deterministic_algorithms(True)
     device = select_device(config.device)
+    batches = math.ceil(len(data.datasets["train"]) / config.batch_size)
+    updates_per_epoch = math.ceil(batches / config.gradient_accumulation_steps)
+    scheduler = config.scheduler
+    if resume is not None and scheduler.warmup_fraction is not None:
+        saved = SchedulerConfig(**resume["training_config"]["scheduler"])
+        if saved.warmup_fraction == scheduler.warmup_fraction and saved.type == scheduler.type:
+            scheduler = saved
+    planned_epochs = getattr(args, "planned_epochs", None)
+    if planned_epochs is not None and (resume is not None or planned_epochs < config.epochs):
+        raise ValueError("--planned-epochs is for a fresh run and must be at least --epochs")
+    config = replace(config, scheduler=resolve_schedule(scheduler, updates_per_epoch * (planned_epochs or config.epochs)))
     LOGGER.info("Resolved settings: %s", json.dumps({"training": asdict(config), "model": asdict(model_config), "data": asdict(data_config)}))
     LOGGER.info("Device=%s vocabulary=%d pad_id=%d splits=%s", device, data.tokenizer.vocab_size,
                 data.tokenizer.pad_id, {split: len(dataset) for split, dataset in data.datasets.items()})
@@ -57,9 +73,7 @@ def run(args: argparse.Namespace) -> None:
     def train_loader(epoch: int):
         return data.loader("train", config.batch_size, (config.seed + epoch) % 2**63, shuffle=True)
 
-    batches = len(train_loader(1))
-    LOGGER.info("Batches per epoch=%d optimizer updates per epoch=%d", batches,
-                math.ceil(batches / config.gradient_accumulation_steps))
+    LOGGER.info("Batches per epoch=%d optimizer updates per epoch=%d", batches, updates_per_epoch)
     if args.dry_run:
         if resume is not None:
             raise ValueError("--dry-run cannot be combined with --resume")
@@ -108,6 +122,7 @@ def main() -> None:
     parser.add_argument("--device", choices=("auto", "cpu", "cuda", "mps"))
     parser.add_argument("--epochs", type=int, help="Total target epoch count, including resumed epochs")
     parser.add_argument("--batch-size", type=int)
+    parser.add_argument("--planned-epochs", type=int, help="Warmup planning horizon when stopping a fresh run early")
     parser.add_argument("--resume", type=Path)
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--dry-run", action="store_true")

@@ -42,11 +42,19 @@ class OptimizerConfig:
 class SchedulerConfig:
     type: str = "inverse_sqrt"
     warmup_steps: int = 100
+    warmup_fraction: float | None = None
+    planned_updates: int | None = None
 
     def __post_init__(self) -> None:
         if self.type not in ("constant", "inverse_sqrt"):
             raise ValueError("scheduler.type must be constant or inverse_sqrt")
         _positive_int("warmup_steps", self.warmup_steps)
+        if self.warmup_fraction is not None:
+            _number("warmup_fraction", self.warmup_fraction, 0, strict=True)
+            if self.warmup_fraction > 1 or self.type != "inverse_sqrt":
+                raise ValueError("warmup_fraction requires inverse_sqrt and must be at most one")
+        if self.planned_updates is not None:
+            _positive_int("planned_updates", self.planned_updates)
 
 
 @dataclass(frozen=True)
@@ -86,6 +94,7 @@ class TrainingConfig:
     early_stopping: EarlyStoppingConfig = field(default_factory=EarlyStoppingConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     mixed_precision: bool = False
+    deterministic_algorithms: bool = False
 
     def __post_init__(self) -> None:
         for name in ("epochs", "batch_size", "gradient_accumulation_steps", "validation_frequency", "checkpoint_frequency"):
@@ -98,8 +107,9 @@ class TrainingConfig:
         _number("label_smoothing", self.label_smoothing, 0)
         if self.label_smoothing > 1:
             raise ValueError("label_smoothing must be at most 1")
-        if type(self.mixed_precision) is not bool:
-            raise ValueError("mixed_precision must be boolean")
+        for name in ("mixed_precision", "deterministic_algorithms"):
+            if type(getattr(self, name)) is not bool:
+                raise ValueError(f"{name} must be boolean")
 
     @classmethod
     def from_dict(cls, values: dict) -> "TrainingConfig":

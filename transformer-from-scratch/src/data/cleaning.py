@@ -64,12 +64,18 @@ def split_pairs(
     pairs: list[TranslationPair], seed: int, ratios: tuple[float, float, float]
 ) -> dict[str, list[TranslationPair]]:
     """Keep all translations of each normalized source in the same split."""
-    if not all(isfinite(ratio) and ratio > 0 for ratio in ratios) or not isclose(sum(ratios), 1):
-        raise ValueError("Split ratios must be positive and add up to 1")
     grouped: dict[str, list[TranslationPair]] = {}
     for pair in pairs:
         grouped.setdefault(pair.source, []).append(pair)
-    groups = list(grouped.values())
+    return split_groups(list(grouped.values()), seed, ratios)
+
+
+def split_groups(
+    groups: list[list[TranslationPair]], seed: int, ratios: tuple[float, float, float],
+) -> dict[str, list[TranslationPair]]:
+    if not all(isfinite(ratio) and ratio > 0 for ratio in ratios) or not isclose(sum(ratios), 1):
+        raise ValueError("Split ratios must be positive and add up to 1")
+    groups = list(groups)
     names = ("train", "val", "test")
     if len(groups) < len(names):
         raise ValueError("A valid split needs at least three distinct English sources")
@@ -77,7 +83,8 @@ def split_pairs(
     # Stable sorting preserves seeded tie-breaking and places large groups first.
     groups.sort(key=len, reverse=True)
     splits: dict[str, list[TranslationPair]] = {name: [] for name in names}
-    goals = dict(zip(names, (len(pairs) * ratio for ratio in ratios), strict=True))
+    total = sum(map(len, groups))
+    goals = dict(zip(names, (total * ratio for ratio in ratios), strict=True))
     for index, group in enumerate(groups):
         empty = [name for name in names if not splits[name]]
         candidates = empty if len(groups) - index == len(empty) else names

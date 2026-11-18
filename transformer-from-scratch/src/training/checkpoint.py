@@ -1,5 +1,7 @@
 """Versioned state-dictionary checkpoints with atomic replacement."""
 
+import hashlib
+import json
 import os
 import pickle
 import tempfile
@@ -15,6 +17,13 @@ REQUIRED_KEYS = {
 }
 
 
+def experiment_fingerprints(payload: dict) -> dict[str, str]:
+    return {
+        key: hashlib.sha256(json.dumps(payload[key], sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+        for key in ("training_config", "model_config", "tokenizer_metadata", "data_identity")
+    }
+
+
 def load_checkpoint(path: Path) -> dict:
     if not path.is_file():
         raise FileNotFoundError(f"Checkpoint does not exist: {path}")
@@ -27,6 +36,8 @@ def load_checkpoint(path: Path) -> dict:
         or not REQUIRED_KEYS.issubset(payload)
     ):
         raise ValueError(f"Unsupported or incomplete training checkpoint: {path}")
+    if "fingerprints" in payload and payload["fingerprints"] != experiment_fingerprints(payload):
+        raise ValueError(f"Checkpoint metadata fingerprint mismatch: {path}")
     return payload
 
 
@@ -50,7 +61,8 @@ class CheckpointManager:
         with tempfile.NamedTemporaryFile(dir=self.directory, delete=False) as stream:
             temporary = Path(stream.name)
             try:
-                torch.save({**payload, "version": CHECKPOINT_VERSION}, stream)
+                torch.save({**payload, "version": CHECKPOINT_VERSION,
+                            "fingerprints": experiment_fingerprints(payload)}, stream)
                 stream.flush()
                 os.fsync(stream.fileno())
                 stream.close()
