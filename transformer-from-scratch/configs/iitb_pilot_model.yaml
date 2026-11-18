@@ -1,0 +1,10 @@
+model:
+  d_model: 128
+  num_heads: 4
+  num_encoder_layers: 2
+  num_decoder_layers: 2
+  d_ff: 512
+  max_seq_len: 128
+  dropout: 0.1
+  attention_dropout: 0.1
+  normalization_style: post_norm

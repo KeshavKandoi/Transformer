@@ -1,0 +1,19 @@
+training:
+  epochs: 15
+  batch_size: 8
+  gradient_accumulation_steps: 2
+  seed: 42
+  device: auto
+  deterministic_algorithms: true
+  optimizer:
+    learning_rate: 0.0003
+  scheduler:
+    type: inverse_sqrt
+    warmup_fraction: 0.1
+  max_grad_norm: 1.0
+  label_smoothing: 0.0
+  validation_frequency: 1
+  checkpoint_frequency: 1
+  early_stopping:
+    enabled: true
+    patience: 5

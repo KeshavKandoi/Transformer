@@ -1,0 +1,17 @@
+model:
+  d_model: 256
+  max_seq_len: 128
+  dropout: 0.1
+
+  num_heads: 4
+  attention_dropout: 0.1
+
+  d_ff: 1024
+  layer_norm_eps: 0.00001
+  normalization_style: post_norm
+  ffn_activation: relu
+
+  num_encoder_layers: 4
+
+  num_decoder_layers: 4
+  output_projection_bias: false

@@ -4,3 +4,5 @@ PyYAML>=6,<7
 pytest>=8,<10
 sacrebleu==2.5.1
 langid==1.1.6
+huggingface-hub==1.33.0
+pyarrow==23.0.1
