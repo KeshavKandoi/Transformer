@@ -56,27 +56,42 @@ def _language_mismatch(text: str, expected: str, policy: CorpusPolicy) -> bool:
     return language != expected and confidence >= policy.language_confidence
 
 
-def filter_pairs(pairs: list[TranslationPair], policy: CorpusPolicy) -> tuple[list[TranslationPair], dict[str, int]]:
+def filter_pairs(
+    pairs: list[TranslationPair], policy: CorpusPolicy, *, side_flags: dict[str, int] | None = None,
+) -> tuple[list[TranslationPair], dict[str, int]]:
     accepted: dict[tuple[str, str], TranslationPair] = {}
     rejected: Counter[str] = Counter()
+
+    def reject(reason: str, source_bad: bool, target_bad: bool) -> bool:
+        if not (source_bad or target_bad):
+            return False
+        rejected[reason] += 1
+        if side_flags is not None:
+            for side, bad in (("source", source_bad), ("target", target_bad)):
+                if bad:
+                    key = f"{side}_{reason}"
+                    side_flags[key] = side_flags.get(key, 0) + 1
+        return True
+
+    def invalid_format(text: str) -> bool:
+        return any(unicodedata.category(char) == "Cf" and char not in "\u200c\u200d" for char in text)
+
     for original in pairs:
         pair = TranslationPair(" ".join(original.source.split()), " ".join(original.target.split()))
-        if any(unicodedata.category(char) == "Cf" and char not in "\u200c\u200d"
-               for text in (pair.source, pair.target) for char in text):
-            rejected["unicode_format"] += 1
+        if reject("unicode_format", invalid_format(pair.source), invalid_format(pair.target)):
             continue
-        if not (_dominant_script(pair.source, "LATIN") and _dominant_script(pair.target, "DEVANAGARI")):
-            rejected["script"] += 1
+        if reject("script", not _dominant_script(pair.source, "LATIN"), not _dominant_script(pair.target, "DEVANAGARI")):
             continue
-        words = [len(text.split()) for text in (pair.source, pair.target)]
-        if max(len(pair.source), len(pair.target)) > policy.max_chars or max(words) > policy.max_words:
-            rejected["length"] += 1
+        source_words, target_words = len(pair.source.split()), len(pair.target.split())
+        if reject("length",
+                  len(pair.source) > policy.max_chars or source_words > policy.max_words,
+                  len(pair.target) > policy.max_chars or target_words > policy.max_words):
             continue
-        if max(words) / min(words) > policy.max_word_ratio:
+        if max(source_words, target_words) / min(source_words, target_words) > policy.max_word_ratio:
             rejected["length_ratio"] += 1
             continue
-        if _language_mismatch(pair.source, "en", policy) or _language_mismatch(pair.target, "hi", policy):
-            rejected["language"] += 1
+        if reject("language", _language_mismatch(pair.source, "en", policy),
+                  _language_mismatch(pair.target, "hi", policy)):
             continue
         key = (comparison_key(pair.source), comparison_key(pair.target))
         previous = accepted.get(key)

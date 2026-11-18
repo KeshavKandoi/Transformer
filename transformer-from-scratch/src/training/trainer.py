@@ -3,6 +3,7 @@
 import json
 import logging
 import platform
+import sys
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass
@@ -21,6 +22,15 @@ from .utils import capture_rng, forward_batch, restore_rng
 
 LOGGER = logging.getLogger(__name__)
 Batches = Iterable[dict[str, Tensor]]
+
+
+def peak_process_memory() -> int | None:
+    try:
+        import resource
+    except ImportError:
+        return None
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return peak if sys.platform == "darwin" else peak * 1024
 
 
 @dataclass
@@ -208,7 +218,7 @@ class TransformerTrainer:
             self.epoch = epoch
             entry = {
                 "epoch": epoch, "global_step": self.global_step, "train": train, "validation": validation,
-                "seconds": time.perf_counter() - started,
+                "seconds": time.perf_counter() - started, "peak_process_rss_bytes": peak_process_memory(),
                 "trainable_parameters": sum(p.numel() for p in self.model.parameters() if p.requires_grad),
                 "best_validation_loss": self.best_validation_loss,
             }
