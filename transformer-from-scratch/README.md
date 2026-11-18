@@ -174,3 +174,58 @@ The singleton head axis of each Phase 1 mask broadcasts the same rules to every 
 Use separate instances for the three roles so each learns its own projections. Pass only `query_input` for self-attention and additionally pass `key_value_input` for cross-attention. By default the call returns the projected context. Pass `return_attention_weights=True` to receive `(context, probabilities)`. The probabilities are from before dropout. During training, `attention_dropout` applies once to the probabilities used to compute each head's context.
 
 Phase 5 can call the module with the position-aware input vectors and the matching boolean mask, then use its `[B, Tq, d_model]` context in the residual path and normalization.
+
+## Phase 5 · Layer normalization, residual connections and feed-forward network
+
+After preparing the data, run the component inspection and tests from the project root.
+
+```bash
+python scripts/inspect_transformer_components.py
+python scripts/inspect_transformer_components.py --split val
+python scripts/inspect_transformer_components.py --split test
+python -m pytest tests/test_layer_norm.py tests/test_residual.py tests/test_feed_forward.py tests/test_phase5_integration.py -q
+python -m pytest -q -rs
+```
+
+The inspector defaults to CPU and accepts `--device cuda` or `--device mps` when available. It uses a temporary regression objective on valid token positions to verify gradients and one optimizer step.
+
+### Layer normalization
+
+For each token independently, compute the mean and population variance across its feature values.
+
+```text
+mean = mean(x)
+variance = mean((x - mean)²)
+output = gamma × (x - mean) / sqrt(variance + epsilon) + beta
+```
+
+With the initial gamma of one and beta of zero, `[2, 4, 6]` becomes approximately `[-1.2247, 0, 1.2247]`. Epsilon keeps the denominator positive for constant vectors. Training can adjust gamma to scale each feature and beta to shift it. LayerNorm works across a token's features and uses the same computation in training and evaluation. BatchNorm typically aggregates per-feature statistics across examples during training and uses running statistics during evaluation. Attention softmax instead converts scores across keys into nonnegative probabilities that sum to one.
+
+### Post-norm and padding
+
+The residual path adds the original input to the dropped sublayer output. The addition provides a direct path for gradients through the sum. In the original post-norm design, normalization follows that addition. Each sublayer owns a separate gamma and beta. [Attention Is All You Need, §3.1 and §5.4](https://arxiv.org/abs/1706.03762)
+
+```text
+A = MultiHeadAttention(X, attention_mask)
+Y = LayerNorm(X + Dropout(A))
+F = FFN(Y)
+Z = LayerNorm(Y + Dropout(F))
+```
+
+A padded query can attend to valid keys, and even a zero vector can become nonzero after normalization when beta learns a shift. Pass `token_valid_mask=token_ids.ne(pad_id)` to each residual wrapper to zero padded query vectors after normalization. This boolean `[B, T]` mask describes query positions. The Phase 1 attention mask controls allowed keys.
+
+### Position-wise feed-forward network
+
+The FFN applies the same parameters to each token independently. Its first linear layer expands 256 features to 1024 so the network can form more intermediate features. ReLU clips negative activations to zero and introduces nonlinearity. The second linear layer returns to width 256 so the result can be added to the residual input.
+
+| Stage | Output shape with default configuration |
+| --- | --- |
+| Embedding, attention, first post-norm | `[B, T, 256]` |
+| FFN first linear and ReLU | `[B, T, 1024]` |
+| FFN second linear and final post-norm | `[B, T, 256]` |
+
+The FFN applies hidden dropout after ReLU and before its second linear layer. Each residual wrapper separately drops features of the sublayer output before addition. Both dropout locations are disabled in evaluation mode. The defaults use `dropout: 0.1`, `layer_norm_eps: 0.00001`, `normalization_style: post_norm` and `ffn_activation: relu` in `configs/model_config.yaml`.
+
+### Phase 6 interface
+
+An encoder block can call `MultiHeadAttention` with the source representations and encoder key mask, use `ResidualAddNorm(x, attention_output, token_valid_mask)`, pass that result through `PositionwiseFeedForward`, and apply a second independent `ResidualAddNorm` using the same token-validity mask. The resulting `[B, S, d_model]` tensor can feed the next encoder block.
