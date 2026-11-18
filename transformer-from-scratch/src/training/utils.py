@@ -14,7 +14,7 @@ from ..data.cleaning import read_parallel_csv
 from ..data.collator import ParallelCollator
 from ..data.config import ROOT, DataConfig
 from ..data.dataset import ParallelDataset
-from ..data.prepared import SPLITS, preparation_settings, prepared_fingerprints
+from ..data.prepared import SPLITS, load_tokenizer_artifact, preparation_settings, prepared_fingerprints
 from ..data.tokenizer import BilingualBPETokenizer
 
 
@@ -78,18 +78,7 @@ def load_prepared_data(
     expected = {"version": 1, "preparation_settings": preparation_settings(config), **fingerprints}
     if any(manifest.get(name) != value for name, value in expected.items()):
         raise ValueError("Prepared splits, tokenizer or data settings do not match. Rerun scripts/prepare_data.py.")
-    tokenizer = BilingualBPETokenizer.load(tokenizer_dir)
-    metadata = {
-        "vocab_size": tokenizer.vocab_size,
-        "special_token_ids": {
-            "<pad>": tokenizer.pad_id, "<unk>": tokenizer.unk_id,
-            "<bos>": tokenizer.bos_id, "<eos>": tokenizer.eos_id,
-        },
-    }
-    saved_metadata = json.loads((tokenizer_dir / "metadata.json").read_text(encoding="utf-8"))
-    if metadata != saved_metadata:
-        raise ValueError("Tokenizer metadata does not match tokenizer.json")
-    metadata["tokenizer_sha256"] = fingerprints["tokenizer_sha256"]
+    tokenizer, metadata = load_tokenizer_artifact(tokenizer_dir, fingerprints["tokenizer_sha256"])
     datasets = {}
     sources: set[str] = set()
     for name in splits:
