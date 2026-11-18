@@ -1,4 +1,6 @@
-# Transformer from scratch · Phase 1
+# Transformer from scratch
+
+## Phase 1 · Data preparation
 
 This project prepares English–Hindi parallel text for an encoder–decoder Transformer. It cleans and splits a CSV, trains a shared byte-level BPE vocabulary from scratch, and builds padded PyTorch batches for teacher forcing. Phase 1 ends at the batch interface. [Attention Is All You Need](https://arxiv.org/abs/1706.03762)
 
@@ -60,8 +62,47 @@ T T T T
 
 Encoder `<eos>` and decoder `<bos>` ensure each valid query has an allowed key. Padded queries may still produce intermediate outputs because the masks operate on keys. Use `ignore_index=tokenizer.pad_id` on decoder labels for the loss. These booleans follow PyTorch scaled dot-product attention semantics. The decoder mask already includes causality, so pass it as `attn_mask` with `is_causal=False`. [PyTorch scaled dot-product attention](https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html)
 
-## Phase 2 interface
+## Phase 1 outputs for embeddings
 
 Use the saved tokenizer's actual vocabulary size and padding ID to configure embeddings. The encoder and decoder ID tensors index those embeddings and determine the positional encoding lengths. The three masks are ready for attention layers, and the shifted labels are ready for a later training loop.
 
 The 40-pair sample is for testing the pipeline. Its vocabulary and held-out splits are too small for meaningful translation training or evaluation.
+
+## Phase 2 · Token embeddings and positions
+
+Run this after Phase 1 preparation, from the project root:
+
+```bash
+python scripts/inspect_embeddings.py
+python -m pytest -q
+```
+
+The inspection script uses the saved tokenizer's actual vocabulary size and padding ID. It accepts the same `--config`, `--processed-dir` and `--tokenizer-dir` options as the batch inspector, as well as `--split` and `--model-config`. In `configs/model_config.yaml`, set `max_seq_len` to at least the larger of the data config's source and target limits. The default embedding width is 256, the maximum length is 128 and dropout is 0.1. This phase uses a positive, even embedding width.
+
+### From token IDs to vectors
+
+An embedding matrix is a trainable table with one row per tokenizer ID and `d_model` values per row. For example, given IDs `[17, 42]`, PyTorch's `nn.Embedding` retrieves rows 17 and 42. The integer IDs are lookup indices. Attention needs floating-point vectors it can project into queries, keys and values.
+
+Each table starts with randomly initialized parameters. The training objective will shape these parameters into representations useful for translation. The padding row starts at zero and receives no lookup gradient. The encoder and decoder have separate tables so they can learn independently, even though they index the same bilingual vocabulary. Sharing the tables or tying decoder embeddings to the output projection are later design choices. [PyTorch Embedding documentation](https://docs.pytorch.org/docs/stable/generated/torch.nn.Embedding.html)
+
+The original Transformer multiplies token vectors by `sqrt(d_model)` before adding position information. This makes the token contribution larger relative to the bounded sinusoidal values. [Attention Is All You Need, §3.4–3.5](https://arxiv.org/abs/1706.03762)
+
+### From vectors to position-aware representations
+
+Positions start at zero because the first column in each batch sequence is indexed by zero. Each pair of features uses sine and cosine at the same frequency. Later pairs change more slowly across positions.
+
+```text
+PE(pos, 2i)     = sin(pos / 10000^(2i/d_model))
+PE(pos, 2i + 1) = cos(pos / 10000^(2i/d_model))
+```
+
+For width 6, position zero is `[0, 1, 0, 1, 0, 1]`. Position one begins `[0.8415, 0.5403, 0.0464, 0.9989, 0.0022, 1.0000]`. Position and token vectors both have width `d_model`, so they can be added element by element and attention receives the same feature width. The precomputed position table is a persistent, non-trainable buffer that moves with the module.
+
+Training-mode dropout randomly zeros features and rescales the survivors. In evaluation mode it passes the combined vector through as-is. After dropout, the module zeros every vector whose input ID equals the tokenizer's padding ID. Valid tokens, including `<bos>` and `<eos>`, keep their positional contribution.
+
+| Input | Output |
+| --- | --- |
+| `encoder_input_ids [B, S]` | `encoder_x [B, S, d_model]` |
+| `decoder_input_ids [B, T]` | `decoder_x [B, T, d_model]` |
+
+Phase 3 self-attention will receive these position-aware vectors and the corresponding Phase 1 boolean masks. Use the encoder mask with `encoder_x` and the causal decoder mask with `decoder_x`. The embedding modules leave the batch's masks and shifted decoder labels untouched.
