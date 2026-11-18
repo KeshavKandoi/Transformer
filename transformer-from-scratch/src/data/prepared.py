@@ -31,13 +31,16 @@ def prepared_fingerprints(processed_dir: Path, tokenizer_dir: Path) -> dict:
 
 def write_preparation_manifest(
     processed_dir: Path, tokenizer_dir: Path, source_path: Path, config: DataConfig,
+    *, corpus: dict | None = None, input_sha256: str | None = None,
 ) -> None:
     manifest = {
         "version": 1,
-        "input_sha256": file_digest(source_path),
+        "input_sha256": input_sha256 or file_digest(source_path),
         "preparation_settings": preparation_settings(config),
         **prepared_fingerprints(processed_dir, tokenizer_dir),
     }
+    if corpus is not None:
+        manifest["corpus"] = corpus
     (processed_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
 

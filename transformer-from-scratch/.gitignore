@@ -8,3 +8,4 @@ artifacts/tokenizer/**/*.json
 /runs/*
 !/runs/.gitkeep
 /data/processed/**/manifest.json
+/experiments/

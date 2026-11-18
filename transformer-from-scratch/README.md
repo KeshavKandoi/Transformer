@@ -451,3 +451,23 @@ python -m pytest -q -rs
 ```
 
 For Phase 11, the vocabulary-logit step takes the current decoder prefix, source padding information and encoder memory. A future cached step can implement that contract while keeping the decoding strategies independent of attention internals.
+
+## Reproducible local-corpus experiment
+
+The [repository README](../README.md) gives the import, dry-run, training and evaluation commands. The experiment uses the existing Transformer architecture and separate data, tokenizer and checkpoint directories. Set the BPE vocabulary target, split fractions and sequence limits in `configs/experiment_data.yaml`. Set the device, batch size, seed and optimizer options in `configs/experiment_training.yaml`.
+
+### Import, quality and leakage
+
+The importer reads an explicitly selected UTF-8 CSV, checks row structure, collapses whitespace and uses NFC text. It rejects replacement characters, unexpected formatting controls, empty or script-inconsistent rows, excessive character and word lengths, and extreme source/target word-count ratios. A second offline LangID check uses bundled language profiles to reject high-confidence language mismatches on longer inputs. Short text and low-confidence cases still depend on the script filter. Spot-check for misaligned translations, code switching and language errors. These filters are quality heuristics. [LangID documentation](https://github.com/saffsd/langid.py)
+
+The split comparison key normalizes case, punctuation and compatibility characters. Exact equal sources or targets and sentence pairs that reach the configured padded character-trigram Jaccard threshold on either side are grouped transitively. Connected groups stay together in a seeded three-way split. Large groups can skew the target ratios. Semantic paraphrases and documents that share context can still cross splits. If you're working with a corpus that has document or conversation IDs, keep those units separate when preparing your input. The importer validates post-BPE sequence lengths with room for boundary IDs and fails if an example would be truncated. Adjust the import filters or the data and model limits before retrying.
+
+BPE is fitted using train rows only. A new import requires a fresh output directory. The manifests and checkpoints record SHA-256 fingerprints for raw input, splits, tokenizer mapping and resolved settings. Checkpoints also record runtime metadata. Back up the matching artifacts, settings, dependency versions and checkpoint together. Exact continuation is verified at epoch boundaries on the same CPU runtime. Strict deterministic algorithms are enabled by the experiment config. CPU, CUDA and MPS can have different floating-point results, and strict mode can reject an operation on a backend lacking a deterministic implementation. Use CPU for strict reproducibility when necessary.
+
+### Warmup, resume and generated metrics
+
+The default experimental inverse-square-root schedule warms up for 10% of planned optimizer updates, rounded up and capped to leave a decay update when possible. The horizon accounts for batch size and accumulation. Set `--planned-epochs` when intentionally stopping the first invocation earlier than the original budget. Resume using `scripts/train.py --resume checkpoints/<run>/latest.pt --epochs <total>` with the same data-config, processed and tokenizer arguments. The original resolved warmup survives resume and epoch extensions.
+
+`scripts/evaluate_translations.py` scores **generated** translations on validation or explicitly selected test rows using corpus chrF2 and international-tokenized BLEU. It saves metric signatures, raw predictions and references, EOS flags, and checkpoint fingerprints. With `--training-metrics runs/<run>/metrics.jsonl` it also exports `training_curves.csv` through the evaluated checkpoint epoch. Run-level JSONL retains all completed epochs. Use the same text and decode settings when comparing checkpoints. `--limit` produces a clearly marked subset report. [SacreBLEU metric documentation](https://github.com/mjpost/sacrebleu)
+
+Run `python -m pytest tests/test_corpus_experiment.py -q` for quality, leakage, metrics, EOS and the local-corpus train/evaluate integration checks.

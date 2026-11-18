@@ -2,6 +2,7 @@
 
 import json
 import logging
+import platform
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass
@@ -10,7 +11,7 @@ from pathlib import Path
 import torch
 from torch import Tensor, nn
 
-from .checkpoint import CheckpointManager, validate_checkpoint
+from .checkpoint import CheckpointManager, experiment_fingerprints, validate_checkpoint
 from .config import EarlyStoppingConfig, TrainingConfig
 from .loss import masked_cross_entropy
 from .metrics import TokenMetrics
@@ -163,11 +164,14 @@ class TransformerTrainer:
             "training_config": asdict(self.config), "model_config": self.model_config,
             "tokenizer_metadata": self.tokenizer_metadata, "data_identity": self.data_identity,
             "rng_state": capture_rng(self.device),
+            "runtime": {"python": platform.python_version(), "torch": str(torch.__version__),
+                        "platform": platform.platform(), "device": str(self.device)},
         }
 
     def restore(self, payload: dict) -> None:
         validate_checkpoint(payload, self.model_config, self.tokenizer_metadata, self.data_identity)
-        current, saved = asdict(self.config), payload["training_config"]
+        current = asdict(self.config)
+        saved = asdict(TrainingConfig.from_dict(payload["training_config"]))
         for key in current.keys() - {"epochs", "device", "checkpoint_frequency", "logging"}:
             if current[key] != saved.get(key):
                 raise ValueError(f"Checkpoint training configuration differs for {key}")
@@ -208,9 +212,12 @@ class TransformerTrainer:
                 "trainable_parameters": sum(p.numel() for p in self.model.parameters() if p.requires_grad),
                 "best_validation_loss": self.best_validation_loss,
             }
+            if self.checkpoint_manager is not None or self.metrics_path is not None:
+                state = self.state_dict()
+                entry["fingerprints"] = experiment_fingerprints(state)
             if self.checkpoint_manager is not None:
                 self.checkpoint_manager.save_epoch(
-                    self.state_dict(), best=improved, snapshot=epoch % self.config.checkpoint_frequency == 0,
+                    state, best=improved, snapshot=epoch % self.config.checkpoint_frequency == 0,
                 )
             if self.metrics_path is not None:
                 self.metrics_path.parent.mkdir(parents=True, exist_ok=True)
