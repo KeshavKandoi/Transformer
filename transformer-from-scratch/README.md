@@ -367,3 +367,57 @@ python -m pytest -q -rs
 ```
 
 The inspector runs one temporary optimizer step and verifies state-dictionary reload. Phase 9 will build the training and validation loops around this logits interface, including repeated optimization and reporting on held-out data. Autoregressive translation will require a later decoding loop.
+
+## Phase 9 · Training and evaluation
+
+Run preparation once before training. Preparation writes a manifest pairing the split files, tokenizer hash and split settings. Rerun preparation for artifacts from before Phase 9 or when changing preparation settings.
+
+```bash
+python scripts/prepare_data.py
+python scripts/train.py --config configs/training_config.yaml --dry-run
+python scripts/overfit_single_batch.py --curve runs/overfit.jsonl
+python scripts/train.py --config configs/training_config.yaml --device cpu --run-name en-hi
+python scripts/train.py --resume checkpoints/en-hi/latest.pt --epochs 25
+python scripts/evaluate.py --checkpoint checkpoints/en-hi/best.pt --device cpu
+python scripts/evaluate.py --checkpoint checkpoints/en-hi/best.pt --split test
+```
+
+The dry run executes a real forward, loss and backward pass. The overfit diagnostic repeatedly trains a small model with dropout disabled on one real batch. It exits with an error if it misses the configured loss target or 95% token accuracy. Use `--max-steps`, `--target-loss`, `--learning-rate` and `--batch-size` to control the experiment. The optional JSONL curve records the initial metrics and every update. If the loss stalls, check BOS/EOS alignment, padding masks, gradient norms and the effective learning rate before running a longer experiment.
+
+### What happens on each update
+
+The model uses shifted decoder inputs and returns raw vocabulary logits. Masked cross-entropy scores the correct next-token IDs and sums the loss over non-padding targets. Backpropagation computes gradients through the vocabulary head, decoder and encoder. AdamW uses running gradient statistics and decoupled weight decay to update the parameters.
+
+For gradient accumulation, each microbatch backpropagates its **summed** loss. Before stepping, the trainer divides accumulated gradients by the total number of valid target tokens in that window. This produces a token-weighted mean even when batches have different amounts of padding. The final partial window also gets an update. Gradient clipping then limits the global norm before AdamW steps. The logged gradient norm is measured before clipping. A non-finite loss or gradient aborts the update with an error.
+
+The default scheduler linearly raises the learning rate to its peak through the warmup boundary, then decays by the inverse square root of the update number. Warmup lets the optimizer start with smaller updates. This is the peak-LR-normalized variant. Set the scheduler type to `constant` for a fixed learning rate. One global step means one optimizer update. The first default update uses `3e-6` and update 100 uses the peak of `3e-4`. [Attention Is All You Need, §5.3](https://arxiv.org/abs/1706.03762)
+
+### Metrics and checkpoints
+
+Console logs show validation summaries and periodic update rates and gradient norms. `runs/<run_name>/metrics.jsonl` has one row per completed epoch, with train and validation metrics, valid-token counts and elapsed time. Loss is averaged over valid tokens. Token accuracy is **teacher-forced next-token accuracy**. Perplexity exponentiates unsmoothed validation loss. Overflow emits a warning and serializes perplexity as `null` with an `overflow` status. Optional label smoothing affects the training objective only and still ignores padded labels.
+
+Validation runs at the first epoch and at the configured validation frequency. The test split is scored only by an explicit `evaluate.py --split test` command. `latest.pt` is replaced atomically each complete epoch, `best.pt` tracks the lowest validation loss, and `checkpoint_frequency` controls numbered snapshots. Early stopping uses consecutive validation checks without a gain exceeding `min_delta`.
+
+Resume from a completed epoch using `--resume`. Set `--epochs` to the desired total, including completed epochs. The checkpoint restores optimizer moments, scheduler, counters and supported Python/PyTorch RNG states. Training order is seeded per epoch, with zero DataLoader workers. The CPU test verified exact continuation with the same runtime and device. Interrupted partial epochs restart from the previous checkpoint. Switching devices can change numerical results. Checkpoints reject changes in architecture, tokenizer mapping, prepared split fingerprints, sequence limits or training-critical settings. Keep the matching tokenizer and prepared splits with a checkpoint. Load checkpoints from trusted sources.
+
+`--device auto` prefers CUDA, then Apple MPS, then CPU. Select `--device cuda` or `--device mps` explicitly when available. Phase 9 runs in float32. Output roots can be changed with `--checkpoint-dir` and `--runs-dir`.
+
+### Larger corpora and the Phase 10 interface
+
+The included 40 examples are suitable for verifying the pipeline and too few for useful translation. Prepare a licensed, provenance-checked English–Hindi parallel CSV with `source` and `target` columns. Use separate artifact directories for each corpus. Preparation splits by English source and trains BPE on the training split only.
+
+```bash
+python scripts/prepare_data.py --input /path/to/parallel.csv \
+  --processed-dir data/processed/real --tokenizer-dir artifacts/tokenizer/real
+python scripts/train.py --processed-dir data/processed/real \
+  --tokenizer-dir artifacts/tokenizer/real --run-name en-hi-real
+```
+
+Use matching directories and `--data-config` for preparation, training and evaluation. The preparation script calls that argument `--config`. Use a held-out corpus and review alignment, duplicates and domain coverage before interpreting metrics. Tune sequence lengths, batch size and warmup on validation data for larger runs.
+
+Phase 10 can load the selected checkpoint's `model_state_dict` with its saved architecture and matching tokenizer, encode source IDs, and use the model's raw next-token logits and tokenizer BOS/EOS/PAD IDs to build autoregressive decoding.
+
+```bash
+python -m pytest tests/test_training_*.py tests/test_phase9_integration.py -q
+python -m pytest -q -rs
+```

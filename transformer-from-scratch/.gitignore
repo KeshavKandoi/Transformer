@@ -3,3 +3,8 @@ __pycache__/
 .pytest_cache/
 data/processed/**/*.csv
 artifacts/tokenizer/**/*.json
+/checkpoints/*
+!/checkpoints/.gitkeep
+/runs/*
+!/runs/.gitkeep
+/data/processed/**/manifest.json
