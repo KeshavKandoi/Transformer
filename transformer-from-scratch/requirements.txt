@@ -1,0 +1,4 @@
+torch>=2.3,<3
+tokenizers>=0.22,<0.23
+PyYAML>=6,<7
+pytest>=8,<10
