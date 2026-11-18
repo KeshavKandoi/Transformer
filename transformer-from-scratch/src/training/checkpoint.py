@@ -9,7 +9,7 @@ from pathlib import Path
 
 import torch
 
-CHECKPOINT_VERSION = 1
+CHECKPOINT_VERSION = 2
 REQUIRED_KEYS = {
     "model_state_dict", "optimizer_state_dict", "scheduler_state_dict",
     "epoch", "global_step", "best_validation_loss", "early_stopping_state",
@@ -32,7 +32,7 @@ def load_checkpoint(path: Path) -> dict:
     except (OSError, ValueError, TypeError, RuntimeError, EOFError, pickle.UnpicklingError) as error:
         raise ValueError(f"Cannot read checkpoint {path}: {error}") from error
     if (
-        not isinstance(payload, dict) or payload.get("version") != CHECKPOINT_VERSION
+        not isinstance(payload, dict) or payload.get("version") not in (1, CHECKPOINT_VERSION)
         or not REQUIRED_KEYS.issubset(payload)
     ):
         raise ValueError(f"Unsupported or incomplete training checkpoint: {path}")
@@ -70,6 +70,10 @@ class CheckpointManager:
             finally:
                 temporary.unlink(missing_ok=True)
         return destination
+
+    def save_update(self, payload: dict) -> Path:
+        """Publish a completed optimizer boundary without touching best.pt."""
+        return self.save("latest.pt", payload)
 
     def save_epoch(self, payload: dict, *, best: bool, snapshot: bool) -> None:
         if best:

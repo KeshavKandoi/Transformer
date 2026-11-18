@@ -3,12 +3,14 @@
 import argparse
 import json
 import random
+from collections.abc import Iterator
 from dataclasses import dataclass
+from itertools import islice
 from pathlib import Path
 
 import torch
 from torch import Tensor, nn
-from torch.utils.data import DataLoader
+from torch.utils.data import BatchSampler, DataLoader, RandomSampler
 
 from ..data.cleaning import read_parallel_csv
 from ..data.collator import ParallelCollator
@@ -52,6 +54,22 @@ def restore_rng(state: dict, device: torch.device) -> None:
         torch.mps.set_rng_state(state["accelerator"].cpu())
 
 
+class RemainingBatches:
+    """Skip index batches without loading or collating their examples."""
+
+    def __init__(self, batches: BatchSampler, start: int) -> None:
+        if not 0 <= start <= len(batches):
+            raise ValueError("Batch cursor is outside the epoch")
+        self.batches = batches
+        self.start = start
+
+    def __iter__(self) -> Iterator[list[int]]:
+        return islice(iter(self.batches), self.start, None)
+
+    def __len__(self) -> int:
+        return len(self.batches) - self.start
+
+
 @dataclass
 class PreparedData:
     tokenizer: BilingualBPETokenizer
@@ -59,12 +77,22 @@ class PreparedData:
     data_identity: dict
     datasets: dict[str, ParallelDataset]
 
-    def loader(self, split: str, batch_size: int, seed: int, *, shuffle: bool = False) -> DataLoader:
-        return DataLoader(
-            self.datasets[split], batch_size=batch_size, shuffle=shuffle,
-            collate_fn=ParallelCollator(self.tokenizer.pad_id),
-            generator=torch.Generator().manual_seed(seed),
-        )
+    def loader(
+        self, split: str, batch_size: int, seed: int, *, shuffle: bool = False, start_batch: int = 0,
+    ) -> DataLoader:
+        dataset = self.datasets[split]
+        generator = torch.Generator().manual_seed(seed)
+        collator = ParallelCollator(self.tokenizer.pad_id)
+        if start_batch:
+            if not shuffle:
+                raise ValueError("A batch cursor requires the reproducible shuffled loader")
+            # DataLoader consumes its iterator seed before the lazy sampler draws the
+            # permutation, just as it does in the existing shuffle=True path.
+            batches = BatchSampler(RandomSampler(dataset, generator=generator), batch_size, drop_last=False)
+            return DataLoader(dataset, batch_sampler=RemainingBatches(batches, start_batch),
+                              collate_fn=collator, generator=generator)
+        return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle,
+                          collate_fn=collator, generator=generator)
 
 
 def load_prepared_data(

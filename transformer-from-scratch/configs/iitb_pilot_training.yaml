@@ -14,6 +14,7 @@ training:
   label_smoothing: 0.0
   validation_frequency: 1
   checkpoint_frequency: 1
+  save_every_updates: 50
   early_stopping:
     enabled: true
     patience: 3

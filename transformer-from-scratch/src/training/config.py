@@ -1,4 +1,4 @@
-"""Configuration for training and reproducible epoch-boundary resume."""
+"""Configuration for training and reproducible optimizer-boundary resume."""
 
 import math
 from dataclasses import dataclass, field
@@ -91,6 +91,7 @@ class TrainingConfig:
     label_smoothing: float = 0.0
     validation_frequency: int = 1
     checkpoint_frequency: int = 1
+    save_every_updates: int = 50
     early_stopping: EarlyStoppingConfig = field(default_factory=EarlyStoppingConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     mixed_precision: bool = False
@@ -99,6 +100,8 @@ class TrainingConfig:
     def __post_init__(self) -> None:
         for name in ("epochs", "batch_size", "gradient_accumulation_steps", "validation_frequency", "checkpoint_frequency"):
             _positive_int(name, getattr(self, name))
+        if type(self.save_every_updates) is not int or self.save_every_updates < 0:
+            raise ValueError("save_every_updates must be a non-negative integer (0 disables periodic saves)")
         if type(self.seed) is not int or not 0 <= self.seed < 2**63:
             raise ValueError("training.seed must be a non-negative 63-bit integer")
         if self.device not in ("auto", "cpu", "cuda", "mps"):

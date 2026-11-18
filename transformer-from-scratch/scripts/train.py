@@ -1,10 +1,11 @@
-"""Train the custom English–Hindi Transformer or resume at an epoch boundary."""
+"""Train the custom English–Hindi Transformer or resume at a completed optimizer update."""
 
 import argparse
 import json
 import logging
 import math
 import os
+import signal
 import sys
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
@@ -37,6 +38,9 @@ def run(args: argparse.Namespace) -> None:
     else:
         config = TrainingConfig.load(ROOT / "configs/training_config.yaml")
     overrides = {key: getattr(args, key) for key in ("epochs", "batch_size", "device") if getattr(args, key) is not None}
+    save_every_updates = getattr(args, "save_every_updates", None)
+    if save_every_updates is not None:
+        overrides["save_every_updates"] = save_every_updates
     config = replace(config, **overrides)
     model_config = ModelConfig.load(args.model_config)
     data_config = DataConfig.load(args.data_config)
@@ -70,8 +74,9 @@ def run(args: argparse.Namespace) -> None:
     model = EncoderDecoderTransformer(data.tokenizer.vocab_size, data.tokenizer.pad_id, model_config).to(device)
     LOGGER.info("Trainable parameters: %s", f"{sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
-    def train_loader(epoch: int):
-        return data.loader("train", config.batch_size, (config.seed + epoch) % 2**63, shuffle=True)
+    def train_loader(epoch: int, start_batch: int = 0):
+        return data.loader("train", config.batch_size, (config.seed + epoch) % 2**63,
+                           shuffle=True, start_batch=start_batch)
 
     LOGGER.info("Batches per epoch=%d optimizer updates per epoch=%d effective batch ceiling=%d",
                 batches, updates_per_epoch, config.batch_size * config.gradient_accumulation_steps)
@@ -113,20 +118,37 @@ def run(args: argparse.Namespace) -> None:
     latest = checkpoint_dir / "latest.pt"
     if resume is None and (latest.exists() or metrics_path.exists()):
         raise ValueError("Run already exists. Use --resume or choose another --run-name.")
-    if resume is not None and latest.exists() and load_checkpoint(latest)["epoch"] > resume["epoch"]:
-        raise ValueError("The run already has a newer checkpoint. Choose another --run-name to branch.")
+    if resume is not None and latest.exists():
+        current = resume if args.resume.resolve() == latest.resolve() else load_checkpoint(latest)
+        if (current["global_step"], current["epoch"]) > (resume["global_step"], resume["epoch"]):
+            raise ValueError("The run already has a newer checkpoint. Choose another --run-name to branch.")
     trainer = TransformerTrainer(
         model, train_loader, data.loader("val", config.batch_size, config.seed),
         config, device, pad_id=data.tokenizer.pad_id, model_config=asdict(model_config),
         tokenizer_metadata=data.tokenizer_metadata, data_identity=data.data_identity,
-        checkpoint_manager=manager, metrics_path=metrics_path,
+        checkpoint_manager=manager, metrics_path=metrics_path, resume_train_loader=train_loader,
     )
     if resume is not None:
         trainer.restore(resume)
         LOGGER.info("Resumed through epoch %d, optimizer step %d, next LR %.8g",
                     trainer.epoch, trainer.global_step, trainer.optimizer.param_groups[0]["lr"])
+        if trainer.progress is not None:
+            LOGGER.info("Resuming epoch %d at batch offset %d/%d", trainer.progress.epoch,
+                        trainer.progress.next_batch, trainer.progress.batch_count)
     LOGGER.info("Checkpoints: %s | metrics: %s", checkpoint_dir, metrics_path)
-    trainer.fit()
+    interrupted = False
+
+    def request_stop(_signum, _frame):
+        # Avoid raising in AdamW or a checkpoint write. The trainer polls this
+        # flag between microbatches and immediately after a committed update.
+        nonlocal interrupted
+        interrupted = True
+
+    previous_handler = signal.signal(signal.SIGINT, request_stop)
+    try:
+        trainer.fit(lambda: interrupted)
+    finally:
+        signal.signal(signal.SIGINT, previous_handler)
 
 
 def main() -> None:
@@ -138,6 +160,8 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int)
     parser.add_argument("--planned-epochs", type=int, help="Warmup planning horizon when stopping a fresh run early")
     parser.add_argument("--resume", type=Path)
+    parser.add_argument("--save-every-updates", type=int,
+                        help="Replace latest.pt every N committed optimizer updates (default 50, 0 disables)")
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--dry-run", action="store_true")
     modes.add_argument("--overfit-one-batch", action="store_true")
@@ -148,7 +172,7 @@ def main() -> None:
     try:
         run(parser.parse_args())
     except KeyboardInterrupt:
-        LOGGER.warning("Interrupted. Resume from the last complete epoch checkpoint if available.")
+        LOGGER.warning("Interrupted. Resume from the last valid latest.pt if a checkpoint was published.")
         raise SystemExit(130) from None
     except (OSError, ValueError, TypeError, RuntimeError, FloatingPointError) as error:
         LOGGER.error("%s", error)
