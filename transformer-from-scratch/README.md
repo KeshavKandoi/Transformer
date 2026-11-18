@@ -421,3 +421,33 @@ Phase 10 can load the selected checkpoint's `model_state_dict` with its saved ar
 python -m pytest tests/test_training_*.py tests/test_phase9_integration.py -q
 python -m pytest -q -rs
 ```
+
+## Phase 10 · Autoregressive translation inference
+
+Training uses the shifted gold Hindi prefix through teacher forcing. Inference starts with just the tokenizer's BOS ID and feeds each generated token back as part of the next prefix. The source is tokenized with the saved BPE mapping, terminated with EOS, padded if batched, and encoded once per batch. Every decoder step reuses that encoder memory, applies a causal mask to the growing prefix, and masks padded source keys during cross-attention. The vocabulary head reads the last prefix position. A row stops when it generates EOS or hits `max_new_tokens`. The current decoder recomputes the prefix each step.
+
+- **Greedy** chooses the highest-scoring eligible token. Batched rows stop independently.
+- **Beam search** expands the active candidates for a source and prunes by cumulative log probability. It retains completed candidates without extending them. Completed hypotheses are ranked by log probability divided by `((5 + generated_length) / 6) ** length_penalty`, with EOS counted when present. If no beam completes, the highest-ranked active candidate is returned. Width one follows greedy selection.
+- **Sampling** divides logits by temperature, keeps the top `k` candidates, then keeps the smallest probability-sorted prefix reaching `top_p`. The remaining distribution is normalized and sampled. Set `top_k: 0` or `top_p: 1.0` to disable the corresponding filter. A seed makes repeated calls with the same batch and configuration reproducible.
+
+PAD and BOS are excluded from next-token selection. The decoder starts with BOS, and returned diagnostic token IDs exclude that initial BOS but include EOS when generated. Decoding removes BOS, EOS and PAD and preserves a generated `<unk>` marker. Byte-level BPE can produce a replacement character when the model emits an invalid UTF-8 byte sequence. The terminal CLI escapes control characters for display. Immediate EOS returns an empty translation. Overlong input is rejected, and the generation budget must fit the checkpoint's positional limit.
+
+Use a Phase 9 checkpoint and its matching tokenizer. Inference verifies the actual vocabulary and special IDs, the tokenizer file hash and a strict state-dictionary load against the saved architecture.
+
+```bash
+python scripts/translate.py --checkpoint checkpoints/en-hi/best.pt --text "We are friends" --diagnostics
+python scripts/translate.py --checkpoint checkpoints/en-hi/best.pt --text "We are friends" --strategy beam --beam-width 4
+python scripts/translate.py --checkpoint checkpoints/en-hi/best.pt --text "We are friends" --strategy sampling --temperature 0.8 --top-k 20 --top-p 0.9 --seed 42
+python scripts/translate.py --checkpoint checkpoints/en-hi/best.pt --interactive
+python scripts/inspect_generation.py --checkpoint checkpoints/en-hi/best.pt --text "We are friends" --max-new-tokens 16 --top-candidates
+python scripts/inspect_generation.py --checkpoint checkpoints/en-hi/best.pt --examples-per-split 2 --max-new-tokens 16
+```
+
+Set `--tokenizer-dir` for a custom corpus and `--device cpu`, `cuda`, or `mps` to override automatic device selection. Interactive mode loads the model once. The inspection script displays source IDs, encoder memory shape, selected IDs, optional top candidate scores, EOS status and elapsed time. The checkpoint from the 40-pair smoke run can generate mixed-language fragments and fail to emit EOS. Use a larger, well-aligned licensed corpus and held-out translation evaluation to assess quality.
+
+```bash
+python -m pytest tests/test_greedy_decoding.py tests/test_beam_search.py tests/test_sampling.py tests/test_generation_masks.py tests/test_generation_checkpoint.py tests/test_phase10_integration.py -q
+python -m pytest -q -rs
+```
+
+For Phase 11, the vocabulary-logit step takes the current decoder prefix, source padding information and encoder memory. A future cached step can implement that contract while keeping the decoding strategies independent of attention internals.
