@@ -316,3 +316,54 @@ python -m pytest -q -rs
 ```
 
 The inspector defaults to CPU and accepts `--device cuda` or `--device mps` when available. It prints a small map from each layer and runs one temporary optimizer step and a state-dictionary round-trip.
+
+## Phase 8 · Full Transformer and vocabulary logits
+
+`EncoderDecoderTransformer` connects the Phase 6 encoder, Phase 7 decoder and a learned vocabulary projection. The encoder reads the source IDs and passes its memory to the decoder without detaching it. Decoder queries can attend to valid source keys through cross-attention. Causal self-attention limits each target position to itself and earlier valid positions. Because the memory stays in the graph, a loss on the logits can update the vocabulary head and both stacks.
+
+```python
+from src.model.transformer import EncoderDecoderTransformer
+
+model = EncoderDecoderTransformer(tokenizer.vocab_size, tokenizer.pad_id, model_config)
+logits = model(
+    encoder_input_ids=batch["encoder_input_ids"],
+    decoder_input_ids=batch["decoder_input_ids"],
+    encoder_attention_mask=batch["encoder_attention_mask"],
+    decoder_attention_mask=batch["decoder_attention_mask"],
+    cross_attention_mask=batch["cross_attention_mask"],
+)
+```
+
+The model derives padding and causality from the IDs when masks are omitted. Explicit boolean masks can further restrict allowed positions. Set `return_diagnostics=True` to get a `TransformerDiagnostics` result with logits, encoder memory, decoder hidden states, and three sets of pre-dropout attention maps. Use `torch.no_grad()` for inspection without a gradient graph.
+
+| Stage | Observed training batch |
+| --- | --- |
+| Source IDs | `[8, 6]` |
+| Encoder memory | `[8, 6, 256]` |
+| Shifted decoder IDs and target labels | `[8, 16]` each |
+| Decoder hidden states | `[8, 16, 256]` |
+| Vocabulary logits | `[8, 16, 626]` |
+
+For each batch item and target position, the vocabulary projection assigns one raw score, or logit, to every token. That gives the `[batch, target length, vocabulary size]` shape. The saved tokenizer supplies the vocabulary size and pad ID. The output projection has its own weights, separate from both embedding tables. Set `output_projection_bias: true` to enable a bias. With bias enabled, zero padded hidden states can still yield nonzero logits.
+
+Apply `logits.softmax(dim=-1)` when you need probabilities for inspection. Give PyTorch cross-entropy raw logits because it computes log-softmax internally. Teacher forcing supplies `decoder_input_ids`, which start with BOS and contain the gold prefix. Score the corresponding `decoder_target_ids`, which end with EOS. The IDs are already shifted by the data pipeline.
+
+```python
+loss = torch.nn.functional.cross_entropy(
+    logits.reshape(-1, tokenizer.vocab_size),
+    batch["decoder_target_ids"].reshape(-1),
+    ignore_index=tokenizer.pad_id,
+)
+```
+
+Labels are `torch.long`, and at least one label must be a valid non-padding target for the mean loss. The inspection helper rejects all-padding labels. Padding labels contribute neither to the mean nor to the gradient. Top token scores before training reflect random initialization and can decode to fragments, including partial UTF-8 tokens.
+
+```bash
+python scripts/inspect_full_transformer.py
+python scripts/inspect_full_transformer.py --split val
+python scripts/inspect_full_transformer.py --split test
+python -m pytest tests/test_output_projection.py tests/test_full_transformer.py tests/test_transformer_*.py -q
+python -m pytest -q -rs
+```
+
+The inspector runs one temporary optimizer step and verifies state-dictionary reload. Phase 9 will build the training and validation loops around this logits interface, including repeated optimization and reporting on held-out data. Autoregressive translation will require a later decoding loop.

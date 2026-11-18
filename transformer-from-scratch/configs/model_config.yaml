@@ -14,3 +14,4 @@ model:
   num_encoder_layers: 4
 
   num_decoder_layers: 4
+  output_projection_bias: false

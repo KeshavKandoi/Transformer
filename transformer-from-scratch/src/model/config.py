@@ -19,6 +19,7 @@ class ModelConfig:
     layer_norm_eps: float = 1e-5
     normalization_style: str = "post_norm"
     ffn_activation: str = "relu"
+    output_projection_bias: bool = False
 
     def validate_sublayer_settings(self) -> None:
         if self.normalization_style != "post_norm":
