@@ -1,4 +1,4 @@
-"""Model settings and compatibility checks for the embedding stage."""
+"""Model settings and compatibility checks for the Transformer."""
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,6 +15,17 @@ class ModelConfig:
     num_encoder_layers: int = 4
     num_decoder_layers: int = 4
     d_ff: int = 1024
+    attention_dropout: float = 0.1
+
+    @property
+    def head_dim(self) -> int:
+        if type(self.d_model) is not int or self.d_model < 1:
+            raise ValueError("model.d_model must be a positive integer")
+        if type(self.num_heads) is not int or self.num_heads < 1:
+            raise ValueError("model.num_heads must be a positive integer")
+        if self.d_model % self.num_heads:
+            raise ValueError("model.d_model must be divisible by model.num_heads")
+        return self.d_model // self.num_heads
 
     @classmethod
     def load(cls, path: Path) -> "ModelConfig":
