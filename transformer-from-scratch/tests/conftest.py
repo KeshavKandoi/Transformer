@@ -55,3 +55,37 @@ def trainer_factory(training_batches):
         )
 
     return make
+
+
+@pytest.fixture(scope="session")
+def translation_checkpoint(tmp_path_factory):
+    from argparse import Namespace
+    from dataclasses import asdict
+
+    from scripts.prepare_data import prepare
+    from src.data.config import ROOT, DataConfig
+    from src.model.config import ModelConfig
+    from src.model.transformer import EncoderDecoderTransformer
+    from src.training.checkpoint import CheckpointManager
+    from src.training.config import TrainingConfig
+    from src.training.utils import load_prepared_data, seed_everything
+
+    root = tmp_path_factory.mktemp("translation-checkpoint")
+    config_path = ROOT / "configs/data_config.yaml"
+    prepare(Namespace(
+        config=config_path, input=ROOT / "data/raw/sample_parallel.csv",
+        processed_dir=root / "splits", tokenizer_dir=root / "tokenizer",
+    ))
+    data = load_prepared_data(root / "splits", root / "tokenizer", DataConfig.load(config_path))
+    config = ModelConfig(d_model=16, d_ff=32, num_encoder_layers=1, num_decoder_layers=1)
+    seed_everything(42)
+    model = EncoderDecoderTransformer(data.tokenizer.vocab_size, data.tokenizer.pad_id, config)
+    training = next(iter(data.loader("train", 2, 42)))
+    validation = next(iter(data.loader("val", 2, 42)))
+    trainer = TransformerTrainer(
+        model, lambda _: [training], [validation], TrainingConfig(epochs=1), torch.device("cpu"),
+        pad_id=data.tokenizer.pad_id, model_config=asdict(config), tokenizer_metadata=data.tokenizer_metadata,
+        data_identity=data.data_identity, checkpoint_manager=CheckpointManager(root),
+    )
+    trainer.fit()
+    return root / "best.pt", root / "tokenizer", config
