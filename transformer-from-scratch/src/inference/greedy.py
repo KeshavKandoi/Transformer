@@ -13,6 +13,9 @@ NextLogits = Callable[[Tensor], Tensor]
 class TokenStep:
     token_id: int
     candidates: tuple[tuple[int, float], ...]
+    candidate_probabilities: tuple[float, ...] = ()
+    eos_probability: float | None = None
+    entropy_nats: float | None = None
 
 
 @dataclass(frozen=True)
@@ -29,13 +32,15 @@ def suppress_tokens(scores: Tensor, forbidden: Sequence[int]) -> Tensor:
     return scores
 
 
-def token_step(scores: Tensor, token_id: int) -> TokenStep:
+def token_step(scores: Tensor, token_id: int, raw_logits: Tensor, eos_id: int) -> TokenStep:
     indices = scores.argsort(descending=True, stable=True)[:5]
-    candidates = tuple(
-        (index, score) for index, score in zip(indices.tolist(), scores[indices].tolist())
-        if score != -float("inf")
+    indices = indices[torch.isfinite(scores[indices])]
+    probabilities = raw_logits.float().softmax(dim=-1)
+    return TokenStep(
+        token_id, tuple(zip(indices.tolist(), scores[indices].tolist())),
+        tuple(probabilities[indices].tolist()), probabilities[eos_id].item(),
+        torch.special.entr(probabilities).sum().item(),
     )
-    return TokenStep(token_id, candidates)
 
 
 def decode_tokens(
@@ -48,7 +53,8 @@ def decode_tokens(
     generated: list[list[int]] = [[] for _ in range(batch_size)]
     steps: list[list[TokenStep]] = [[] for _ in range(batch_size)]
     for _ in range(max_new_tokens):
-        scores = suppress_tokens(next_logits(prefixes), forbidden)
+        logits = next_logits(prefixes)
+        scores = suppress_tokens(logits, forbidden)
         selected = select(scores)
         appended = []
         for row, token in enumerate(selected.tolist()):
@@ -58,7 +64,7 @@ def decode_tokens(
             appended.append(token)
             generated[row].append(token)
             if trace:
-                steps[row].append(token_step(scores[row], token))
+                steps[row].append(token_step(scores[row], token, logits[row], eos_id))
             finished[row] = token == eos_id
         if all(finished):
             break

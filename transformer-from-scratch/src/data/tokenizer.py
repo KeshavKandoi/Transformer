@@ -72,6 +72,13 @@ class BilingualBPETokenizer:
         tokenizer.encode_special_tokens = True
         return cls(tokenizer)
 
+    def id_to_token(self, token_id: int) -> str:
+        """Return the vocabulary spelling before ByteLevel decoding."""
+        token = self._tokenizer.id_to_token(token_id)
+        if token is None:
+            raise ValueError(f"Unknown tokenizer ID {token_id}")
+        return token
+
     def encode(self, text: str) -> list[int]:
         return self._tokenizer.encode(text, add_special_tokens=False).ids
 

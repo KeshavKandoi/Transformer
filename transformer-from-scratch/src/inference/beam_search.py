@@ -52,7 +52,9 @@ def beam_search_decode(
                 continue
             parent, token = divmod(index, vocab_size)
             beam = active[parent]
-            steps = (*beam.steps, token_step(suppress_tokens(logits[parent], (pad_id, bos_id)), token)) if trace else ()
+            steps = (*beam.steps, token_step(
+                suppress_tokens(logits[parent], (pad_id, bos_id)), token, logits[parent], eos_id,
+            )) if trace else ()
             candidate = _Beam((*beam.ids, token), score, steps)
             if token == eos_id:
                 completed.append(candidate)
