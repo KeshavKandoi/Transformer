@@ -1,0 +1,17 @@
+training:
+  epochs: 24
+  batch_size: 48
+  gradient_accumulation_steps: 1
+  seed: 91
+  device: cpu
+  deterministic_algorithms: true
+  optimizer:
+    learning_rate: 0.0015
+  scheduler:
+    type: inverse_sqrt
+    warmup_fraction: 0.04
+  max_grad_norm: 1
+  save_every_updates: 250
+  early_stopping:
+    enabled: true
+    patience: 5
