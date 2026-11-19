@@ -21,11 +21,13 @@ def main():
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument('checkpoint', type=Path)
     cli.add_argument('output', type=Path)
+    cli.add_argument('--tokenizer-dir', type=Path, default=TOKENIZER)
+    cli.add_argument('--max-new-tokens', type=int, default=80)
     cli.add_argument('--full', action='store_true', help='Also generate for all 494 official rows')
     args = cli.parse_args()
     torch.set_num_threads(2)
-    translator = TransformerTranslator.from_checkpoint(args.checkpoint, TOKENIZER, 'cpu')
-    config = InferenceConfig(device='cpu', strategy='greedy', max_new_tokens=80)
+    translator = TransformerTranslator.from_checkpoint(args.checkpoint, args.tokenizer_dir, 'cpu')
+    config = InferenceConfig(device='cpu', strategy='greedy', max_new_tokens=args.max_new_tokens)
     prior = args.output.parent / 'evaluation_suite.json'
     if not prior.exists():
         prior = Path('runs/iitb-clean-finetune-matched-v1/evaluation_suite.json')
@@ -39,6 +41,16 @@ def main():
             continue
         wrong = read(conditioning)['shuffled_sources'] if name == 'official_fixed' else derange(rows)
         result[name] = measure(translator.model, translator.tokenizer, rows, wrong, config)
+    entity_path = args.output.parent / 'frozen_entity_mentions.json'
+    if entity_path.exists():
+        mentions = read(entity_path)
+        fixed_rows = result['official_fixed']['rows']
+        assert all(fixed_rows[m['row']]['source'] == m['source'] for m in mentions)
+        result['official_fixed']['entity_surface'] = {
+            'eligible':len(mentions),
+            'matched':sum(any(alias in fixed_rows[m['row']]['prediction'] for alias in m['aliases'])
+                          for m in mentions),
+        }
     result['probes'] = [{'source': source, 'prediction': item.text, 'eos': item.hypothesis.reached_eos}
                         for source, item in zip(PROBES, translator.generate(PROBES, config), strict=True)]
     write(args.output, result)
