@@ -558,3 +558,17 @@ HF_HUB_DISABLE_XET=1 .venv/bin/python scripts/download_iitb_dataset.py --revisio
 ### Diagnosing a pilot checkpoint
 
 Use `scripts/diagnose_translation.py` with the checkpoint, its tokenizer and processed split directories to record ByteLevel pieces, Unicode and a raw next-token probability trace. Use `scripts/evaluate_translations.py --split val --limit 100 --stratified` with matching settings and separate 64- and 120-token output directories. `scripts/summarize_translation_diagnosis.py` checks ordered references, checkpoint identity and decoded metric consistency before comparing EOS, repetition and corpus scores. The traces and references should remain private. Successful NFC round-tripping validates known input strings and arbitrary generated IDs can still represent incomplete UTF-8 or poorly formed Hindi.
+
+## Interview demo · constrained English to Hindi
+
+The runnable interview project reuses the custom architecture above and trains a smaller checkpoint from random initialization on a separate, programmatically constructed conversational grammar. The unrestricted IITB runs remain useful failure analyses. The new checkpoint has **99.56% exact accuracy on 1,371 held-out grammar combinations**, but **12.28% on wholly withheld question structures**. It is a constrained technical demo.
+
+From this directory, once the local scratch artifact is present:
+
+```bash
+bash scripts/run_interview_demo.sh
+```
+
+Open <http://127.0.0.1:8765>. The app loads the exact checkpoint and tokenizer, runs greedy or beam inference, displays validation examples, and plots genuine attention tensors, masks and losses. An out-of-scope warning accompanies inputs outside the recorded trainable grammar.
+
+See [architecture](docs/ARCHITECTURE.md), [interview guide](docs/INTERVIEW_GUIDE.md), and [results](docs/EXPERIMENT_RESULTS.md). For a clean local rebuild, create `.venv` with Python 3.11+, install `requirements.txt`, run `scripts/prepare_interview_data.py`, then `bash scripts/train_interview_model.sh`. Run `scripts/evaluate_interview_model.py --validation-only` before launching the demo. Existing experiment directories are preserved; preparation requires a fresh destination. If startup reports a missing artifact, confirm `experiments/interview-transformer-v1` has its tokenizer, validation JSON and `checkpoints/scratch/best.pt`. If port 8765 is in use, pass `--port 8766`. The local lock snapshot and detailed commands are recorded in the experiment directory and run report.
