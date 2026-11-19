@@ -103,9 +103,9 @@ def make_batches(patch, shared, shared_count, updates, seed):
     return batches
 
 
-def batch_for(rows, tokenizer):
+def batch_for(rows, tokenizer, max_length=128):
     pairs = [TranslationPair(row['source'], row['target']) for row in rows]
-    dataset = ParallelDataset(pairs, tokenizer, 128, 128)
+    dataset = ParallelDataset(pairs, tokenizer, max_length, max_length)
     return ParallelCollator(tokenizer.pad_id)([dataset[i] for i in range(len(dataset))])
 
 
@@ -123,7 +123,7 @@ def nll(model, tokenizer, rows):
     losses = 0.0
     tokens = 0
     for start in range(0, len(rows), 8):
-        logits, target = forward_batch(model, batch_for(rows[start:start + 8], tokenizer), CPU)
+        logits, target = forward_batch(model, batch_for(rows[start:start + 8], tokenizer, model.config.max_seq_len), CPU)
         losses += F.cross_entropy(logits.transpose(1, 2), target, ignore_index=tokenizer.pad_id, reduction='sum').item()
         tokens += int(target.ne(tokenizer.pad_id).sum())
     return losses / tokens
