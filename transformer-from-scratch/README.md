@@ -554,3 +554,7 @@ HF_HUB_DISABLE_XET=1 .venv/bin/python scripts/download_iitb_dataset.py --revisio
   --processed-dir "$larger/processed" --tokenizer-dir "$larger/tokenizer" \
   --run-name iitb-50k-v1 --device cpu --dry-run
 ```
+
+### Diagnosing a pilot checkpoint
+
+Use `scripts/diagnose_translation.py` with the checkpoint, its tokenizer and processed split directories to record ByteLevel pieces, Unicode and a raw next-token probability trace. Use `scripts/evaluate_translations.py --split val --limit 100 --stratified` with matching settings and separate 64- and 120-token output directories. `scripts/summarize_translation_diagnosis.py` checks ordered references, checkpoint identity and decoded metric consistency before comparing EOS, repetition and corpus scores. The traces and references should remain private. Successful NFC round-tripping validates known input strings and arbitrary generated IDs can still represent incomplete UTF-8 or poorly formed Hindi.
