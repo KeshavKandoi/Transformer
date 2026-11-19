@@ -64,14 +64,21 @@ def run(args: argparse.Namespace) -> None:
     LOGGER.info("Resolved settings: %s", json.dumps({"training": asdict(config), "model": asdict(model_config), "data": asdict(data_config)}))
     LOGGER.info("Device=%s vocabulary=%d pad_id=%d splits=%s", device, data.tokenizer.vocab_size,
                 data.tokenizer.pad_id, {split: len(dataset) for split, dataset in data.datasets.items()})
+    warm_start = getattr(args, "warm_start", None)
     if args.overfit_one_batch:
-        if resume is not None:
-            raise ValueError("--overfit-one-batch cannot be combined with --resume")
+        if resume is not None or warm_start is not None:
+            raise ValueError("--overfit-one-batch initializes its own model")
         overfit(data, config.device, seed=config.seed, batch_size=min(2, config.batch_size))
         return
 
     seed_everything(config.seed)
     model = EncoderDecoderTransformer(data.tokenizer.vocab_size, data.tokenizer.pad_id, model_config).to(device)
+    if warm_start is not None:
+        init = load_checkpoint(warm_start)
+        if init["model_config"] != asdict(model_config) or init["tokenizer_metadata"] != data.tokenizer_metadata:
+            raise ValueError("Warm-start checkpoint must match the model and exact tokenizer")
+        model.load_state_dict(init["model_state_dict"], strict=True)
+        LOGGER.info("Loaded warm-start weights from %s with a fresh optimizer", warm_start)
     LOGGER.info("Trainable parameters: %s", f"{sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
     def train_loader(epoch: int, start_batch: int = 0):
@@ -159,7 +166,9 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, help="Total target epoch count, including resumed epochs")
     parser.add_argument("--batch-size", type=int)
     parser.add_argument("--planned-epochs", type=int, help="Warmup planning horizon when stopping a fresh run early")
-    parser.add_argument("--resume", type=Path)
+    initialization = parser.add_mutually_exclusive_group()
+    initialization.add_argument("--resume", type=Path)
+    initialization.add_argument("--warm-start", type=Path, help="Load weights only; start a new optimizer and schedule")
     parser.add_argument("--save-every-updates", type=int,
                         help="Replace latest.pt every N committed optimizer updates (default 50, 0 disables)")
     modes = parser.add_mutually_exclusive_group()
