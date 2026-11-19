@@ -569,6 +569,6 @@ From this directory, once the local scratch artifact is present:
 bash scripts/run_interview_demo.sh
 ```
 
-Open <http://127.0.0.1:8765>. The app loads the exact checkpoint and tokenizer, runs greedy or beam inference, displays validation examples, and plots genuine attention tensors, masks and losses. An out-of-scope warning accompanies inputs outside the recorded trainable grammar.
+Open <http://127.0.0.1:8765>. The app loads the exact checkpoint and tokenizer, runs greedy or beam inference, displays validation examples, and plots genuine attention tensors, masks and losses. Inputs outside the recorded trainable grammar receive an explicit rejection before decoding. Matching inputs are canonicalized for case, spacing and final punctuation.
 
 See [architecture](docs/ARCHITECTURE.md), [interview guide](docs/INTERVIEW_GUIDE.md), and [results](docs/EXPERIMENT_RESULTS.md). For a clean local rebuild, create `.venv` with Python 3.11+, install `requirements.txt`, run `scripts/prepare_interview_data.py`, then `bash scripts/train_interview_model.sh`. Run `scripts/evaluate_interview_model.py --validation-only` before launching the demo. Existing experiment directories are preserved; preparation requires a fresh destination. If startup reports a missing artifact, confirm `experiments/interview-transformer-v1` has its tokenizer, validation JSON and `checkpoints/scratch/best.pt`. If port 8765 is in use, pass `--port 8766`. The local lock snapshot and detailed commands are recorded in the experiment directory and run report.
