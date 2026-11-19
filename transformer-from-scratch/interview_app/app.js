@@ -95,25 +95,33 @@ async function translate(event) {
       const p=el('p',out.text||'(empty prediction)','prediction-text');p.lang='hi';
       $('prediction').append(p,el('p',`${mode.toUpperCase()} · ${out.milliseconds} ms · ${out.eos?'EOS':'length limit'}`,'minor'));
     }
-    $('status').className=latest.in_scope?'':'warning';
-    $('status').textContent=latest.in_scope?'Recognized controlled pattern.':'Outside the recorded grammar. This output may be unreliable.';
+    $('status').textContent=latest.source===latest.canonical_source?'Recognized controlled pattern.':
+      `Recognized controlled pattern. Model input: ${latest.canonical_source}`;
     $('inspectControls').hidden=false;matrix();
   }catch(err){
+    latest=null;
+    $('prediction').replaceChildren();
+    $('matrix').replaceChildren();
+    $('tokens').textContent='';
+    $('inspectControls').hidden=true;
     $('status').className='warning';$('status').textContent=err.message;
   }finally{button.disabled=false;}
 }
 $('translateForm').addEventListener('submit',translate);
 for(const key of ['attentionType','layer','head'])$(key).addEventListener('change',matrix);
 request('/api/info').then(info=>{
-  const value=[[`${(info.metrics.exact*100).toFixed(1)}%`,`Validation exact · ${info.metrics.n} rows`],
-    [info.metrics.chrf.toFixed(2),'Validation chrF2'],[info.parameters.toLocaleString(),'Trainable parameters'],
+  const value=[[`${(info.metrics.exact*100).toFixed(1)}%`,`Synthetic in-domain validation exact · ${info.metrics.n} rows`],
+    [`${(info.composition.exact*100).toFixed(2)}%`,`Held-out composition exact · ${info.composition.n} rows`],[info.parameters.toLocaleString(),'Trainable parameters'],
     [`Epoch ${info.epoch}`,info.name]];
   $('stats').replaceChildren(...value.map(([number,label])=>{
     const item=el('article');item.append(el('strong',number),el('span',label));return item;
   }));
+  $('families').textContent=info.families.map(name=>name.replaceAll('-',' ')).join(' · ');
   for(const row of info.gallery){
     const button=el('button',undefined,'example');button.type='button';
-    button.append(el('strong',row.source),el('span',row.prediction||'(empty)'));
+    button.append(el('strong',row.source),el('span',`Prediction · ${row.prediction||'(empty)'}`),
+      el('span',`Generated reference · ${row.target}`),
+      el('span',`${row.exact?'Exact match':'Mismatch'} · ${row.family.replaceAll('-',' ')}`,row.exact?'match':'miss'));
     button.addEventListener('click',()=>{$('english').value=row.source;$('translateForm').requestSubmit();
                                           $('translateForm').scrollIntoView({block:'center'});});
     $('gallery').append(button);
