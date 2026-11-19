@@ -10,3 +10,6 @@ main{max-width:1160px;padding:0 20px;margin:0 auto}section{padding:3rem 0;border
 .stats span,#tokens{overflow-wrap:anywhere}
 .matrix{width:100%;min-width:0}
 @media(max-width:660px){.workbench,.flow{grid-template-columns:minmax(0,1fr)}.stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.example .match{color:var(--mint)}
+.example .miss{color:#ffd08a}
+summary{cursor:pointer;color:var(--accent)}

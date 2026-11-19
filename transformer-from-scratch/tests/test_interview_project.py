@@ -5,7 +5,7 @@ import pytest
 import torch
 
 from scripts.evaluate_interview_model import CHECKPOINT, slot_checks
-from scripts.interview_server import InterviewService
+from scripts.interview_server import InterviewService, UnsupportedInput, canonical_input
 from scripts.prepare_interview_data import ROOT, generate
 from src.data.corpus import comparison_key
 
@@ -58,8 +58,27 @@ def test_service_runs_real_checkpoint_with_valid_attention():
     assert cross.shape[-2:] == (len(maps['target_input']),len(maps['source']))
     assert torch.allclose(encoder.sum(-1),torch.ones_like(encoder.sum(-1)),atol=1e-6)
     assert decoder.triu(1).count_nonzero()==0
-    assert not service.predict('Where are you going?')['in_scope']
+    assert service.predict('i HAVE TWO books')['outputs']['greedy']['text'] == prediction['outputs']['greedy']['text']
+    assert len(service.info['gallery']) == 20
+    assert {r['exact'] for r in service.info['gallery']} == {True, False}
+    with pytest.raises(UnsupportedInput, match='outside'):
+        service.predict('Where are you going?')
     with pytest.raises(ValueError):
         service.predict('   ')
     recorded=json.loads((ROOT/'validation_evaluation.json').read_text())
     assert service.info['metrics']['exact']==recorded['validation']['exact']
+
+
+@pytest.mark.parametrize(('text','code'), [('kaise ho','romanized_hindi'),('Aap kaise hain?','romanized_hindi'),
+                                         ('तुम कैसे हो?','input_language'),('Why is the sky blue?','out_of_domain')])
+def test_input_policy_rejects_before_inference(text, code):
+    with pytest.raises(UnsupportedInput) as error:
+        canonical_input(text, {})
+    assert error.value.code == code
+
+
+def test_input_policy_canonicalizes_surface_variations():
+    scope = {'i have two books':'I have two books.'}
+    assert canonical_input(' i   HAVE TWO books ',scope) == 'I have two books.'
+    with pytest.raises(UnsupportedInput):
+        canonical_input('I have two books +',scope)
