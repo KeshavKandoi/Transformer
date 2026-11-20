@@ -1,4 +1,6 @@
 from collections import defaultdict
+from pathlib import Path
+from zipfile import ZipFile
 
 import pytest
 
@@ -36,19 +38,22 @@ def test_intentional_aliases_and_contraction_normalization():
         canonical_input('love you',scope)
 
 
-def test_v2_checkpoint_serves_alias_and_keeps_scope_enforcement(monkeypatch):
-    from scripts.prepare_conversation_v2 import ROOT
+def test_release_checkpoint_serves_alias_and_keeps_scope_enforcement(monkeypatch, tmp_path):
     from scripts.interview_server import InterviewService
 
-    checkpoint=ROOT/'checkpoints/scratch/best.pt'
-    if not (ROOT/'test_evaluation.json').exists():
-        pytest.skip('Local v2 training and evaluation artifacts required')
+    archive = Path(__file__).resolve().parents[1] / 'assets/release/conversation-v2.zip'
+    with ZipFile(archive) as bundle:
+        bundle.extractall(tmp_path)
+    checkpoint = tmp_path / 'checkpoints/scratch/best.pt'
     import torch
     torch.set_num_threads(2)
-    service=InterviewService(checkpoint,ROOT)
+    service=InterviewService(checkpoint,tmp_path,version='v2')
     assert len(service.info['gallery'])==20
     assert service.info['schema_version'] == 2
     assert service.info['grammar_version'] == 'v2'
+    assert service.info['architecture']['num_heads'] == 4
+    assert service.info['curve'][10]['learning_rate'] > 0
+    assert 'name' in service.info['metrics']['slot_errors']
     for fingerprint in ('checkpoint_sha256', 'dataset_sha256', 'tokenizer_sha256'):
         assert len(service.info[fingerprint]) == 64
     help_punctuated = service.predict('Can you help me?', 'beam')
@@ -63,6 +68,28 @@ def test_v2_checkpoint_serves_alias_and_keeps_scope_enforcement(monkeypatch):
     assert alias['outputs']['greedy']['text']==canonical['outputs']['greedy']['text']
     assert alias['attention']['cross']==canonical['attention']['cross']
     assert service.predict('Where are you going?')['in_scope']
+
+    import math
+
+    attention = help_punctuated['attention']
+    source_length = len(attention['source'])
+    target_length = len(attention['target_input'])
+    for kind, queries, keys in [
+        ('encoder', source_length, source_length),
+        ('decoder', target_length, target_length),
+        ('cross', target_length, source_length),
+    ]:
+        assert len(attention[kind]) == 2
+        for layer in attention[kind]:
+            assert len(layer) == 4
+            for head in layer:
+                assert len(head) == queries
+                for query, weights in enumerate(head):
+                    assert len(weights) == keys
+                    assert all(0 <= value <= 1 for value in weights)
+                    assert math.isclose(sum(weights), 1, abs_tol=1e-6)
+                    if kind == 'decoder':
+                        assert all(value == 0 for value in weights[query + 1:])
 
     def forbidden(*args,**kwargs):
         raise AssertionError('Out-of-domain input reached autoregressive generation')
