@@ -14,7 +14,8 @@ import torch
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(REPO))
 from scripts.evaluate_interview_model import CHECKPOINT
-from scripts.prepare_interview_data import ROOT, generate
+from scripts.prepare_interview_data import ROOT
+from scripts.prepare_conversation_v2 import ROOT as CONVERSATION_ROOT, ALIASES, SEED as CONVERSATION_SEED
 from src.data.corpus import comparison_key
 from src.data.prepared import file_digest
 from src.data.masks import cross_attention_mask, decoder_attention_mask, encoder_attention_mask
@@ -41,13 +42,25 @@ def validation_gallery(rows):
     return [{k: row[k] for k in ('source', 'target', 'prediction', 'family', 'exact')} for row in chosen]
 
 
-def canonical_input(text, scope):
+def canonical_input(text, scope, aliases=None):
     if not isinstance(text, str) or not text.strip() or len(text) > 300:
         raise ValueError('Enter an English sentence between 1 and 300 characters.')
     text = text.strip()
-    key = comparison_key(text)
-    if re.fullmatch(r'[A-Za-z\s]+[.?!]?', text) and key in scope:
-        return scope[key]
+    normalized = text
+    if aliases is not None:
+        normalized = normalized.replace('’', "'")
+        expansions = {"don't":'do not', "doesn't":'does not', "i'm":'I am',
+                      "you're":'you are', "we're":'we are', "they're":'they are',
+                      "what's":'what is'}
+        normalized = re.sub(r"\b[a-z]+['’][a-z]+\b",
+                            lambda m: expansions.get(m.group().lower(), m.group()),
+                            normalized, flags=re.IGNORECASE)
+    key = comparison_key(normalized)
+    if re.fullmatch(r"[A-Za-z\s,]+[.?!]*", normalized):
+        alias = aliases.get(key) if aliases is not None else None
+        match = comparison_key(alias) if alias else key
+        if match in scope:
+            return scope[match]
     if re.search(r'[\u0900-\u097f]', text):
         raise UnsupportedInput('input_language', 'Hindi input is not supported. Please enter English.')
     words = set(key.split())
@@ -63,13 +76,21 @@ class InterviewService:
         self.translator=TransformerTranslator.from_checkpoint(checkpoint,root/'tokenizer','cpu')
         checkpoint_data=load_checkpoint(checkpoint)
         self.lock=threading.Lock()
-        grammar = [row for row in generate() if row['split'] != 'structure']
+        inventory = root/'pairs.jsonl'
+        if file_digest(inventory) != checkpoint_data['data_identity']['input_sha256']:
+            raise ValueError('The grammar inventory does not match the checkpoint dataset.')
+        grammar = [json.loads(line) for line in inventory.read_text(encoding='utf-8').splitlines()]
+        grammar = [row for row in grammar if row['split'] != 'structure']
+        self.aliases = ALIASES if root.resolve()==CONVERSATION_ROOT.resolve() else None
         self.scope = {comparison_key(row['source']):row['source'] for row in grammar}
         validation=json.loads((root/'validation_evaluation.json').read_text())
         if validation['checkpoint_sha256'] != file_digest(checkpoint):
             raise ValueError('Validation results belong to a different checkpoint.')
         summary=validation['validation']
-        gallery=validation_gallery(summary['rows'])
+        gallery_rows=summary['rows']
+        if self.aliases is not None:
+            gallery_rows=sorted(gallery_rows,key=lambda row: row.get('seed')!=CONVERSATION_SEED)
+        gallery=validation_gallery(gallery_rows)
         held_out=json.loads((root/'test_evaluation.json').read_text())
         if held_out['checkpoint_sha256'] != validation['checkpoint_sha256']:
             raise ValueError('Held-out results belong to a different checkpoint.')
@@ -80,6 +101,7 @@ class InterviewService:
                    'epoch':checkpoint_data['epoch'],'updates':checkpoint_data['global_step'],
                    'parameters':sum(p.numel() for p in self.translator.model.parameters()),
                    'vocab':self.translator.tokenizer.vocab_size,'gallery':gallery,
+                   'aliases':self.aliases or {},
                    'families':sorted({r['family'] for r in grammar if r['split']=='train'}),
                    'composition':{'n':composition['count'],'exact':composition['exact']},
                    'metrics':{'n':summary['count'],'exact':summary['exact'],'eos':summary['eos'],
@@ -91,7 +113,7 @@ class InterviewService:
     def predict(self,text,strategy='greedy'):
         if strategy not in ('greedy','beam','compare'):
             raise ValueError('Choose greedy, beam, or compare.')
-        canonical=canonical_input(text,self.scope)
+        canonical=canonical_input(text,self.scope,self.aliases)
         tok=self.translator.tokenizer
         if len(tok.encode(canonical))+1>self.translator.model.config.max_seq_len:
             raise ValueError('This input exceeds the checkpoint positional limit.')
@@ -177,9 +199,11 @@ def handler(service):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--port',type=int,default=8765)
+    parser.add_argument('--version',choices=('v1','v2'),default='v2')
     args=parser.parse_args()
     torch.set_num_threads(3)
-    service=InterviewService()
+    root=CONVERSATION_ROOT if args.version=='v2' else ROOT
+    service=InterviewService(root/'checkpoints/scratch/best.pt',root)
     with ThreadingHTTPServer(('127.0.0.1',args.port),handler(service)) as server:
         print(f'Interview Transformer at http://127.0.0.1:{server.server_port}',flush=True)
         server.serve_forever()

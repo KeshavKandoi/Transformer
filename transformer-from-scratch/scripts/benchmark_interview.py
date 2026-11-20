@@ -1,4 +1,5 @@
 """Compare domain tokenizers and actual scratch-model CPU training throughput."""
+import argparse
 import json
 import resource
 import sys
@@ -22,10 +23,13 @@ from src.training.utils import forward_batch
 
 
 def main():
+    cli=argparse.ArgumentParser(description=__doc__)
+    cli.add_argument("--experiment",type=Path,default=ROOT)
+    root=cli.parse_args().experiment
     torch.set_num_threads(2)
-    rows = [json.loads(line) for line in (ROOT/'pairs.jsonl').read_text().splitlines()]
+    rows = [json.loads(line) for line in (root/'pairs.jsonl').read_text().splitlines()]
     rows = [r for r in rows if r['split']=='train'][:640]
-    modes = [('domain',ROOT/'tokenizer'),('unigram16k',Path('runs/transformer-v2-preparation/tokenizer'))]
+    modes = [('domain',root/'tokenizer'),('unigram16k',Path('runs/transformer-v2-preparation/tokenizer'))]
     result = {'tokenizers':{},'model_shapes':{}}
     config = ModelConfig.load(Path('configs/interview_model.yaml'))
     for name,path in modes:
@@ -51,7 +55,7 @@ def main():
             result['model_shapes'][f'{name}_{width}']={'parameters':sum(p.numel() for p in model.parameters()),
                 'pairs_per_second':384/measured,'threads':2,
                 'cumulative_process_rss_bytes':resource.getrusage(resource.RUSAGE_SELF).ru_maxrss}
-    (ROOT/'benchmark.json').write_text(json.dumps(result,indent=2)+'\n')
+    (root/'benchmark.json').write_text(json.dumps(result,indent=2)+'\n')
     print(result['model_shapes'])
 
 

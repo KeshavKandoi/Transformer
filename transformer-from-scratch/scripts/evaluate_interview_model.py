@@ -36,11 +36,17 @@ def slot_checks(row,text):
     if 'number' in metadata:
         quantities=set(QUANTITIES[1])
         checks['number']=tokens&quantities==expected&quantities
-    if family in ('action-now','action-negative','state','state-negative','preference','preference-negative'):
+    if family in ('action-now','action-negative','state','state-negative','preference','preference-negative','affection-love','affection-miss'):
         checks['negation']=('नहीं' in tokens)==('नहीं' in expected)
     if family.startswith('action') or family.startswith('movement-now') or family=='location-question':
         checked={'रहा','रही','रहे'}
         checks['agreement']=tokens&checked==expected&checked
+    if family in ('affection-love','modal-request'):
+        markers={'करता','करती','करते','सकता','सकती','सकते'}
+        checks['agreement']=tokens&markers==expected&markers
+    if family.startswith('arrival-'):
+        markers={'आऊँगा','आओगे','आएगा','आएगी','आएँगे','आया','आई','आए'}
+        checks['tense']=bool(tokens&expected&markers)
     if family.startswith('movement-'):
         anchors={'movement-past':{'गया','गई','गए'},'movement-now':{'रहा','रही','रहे'},
                  'movement-future':{'जाऊँगा','जाओगे','जाएगा','जाएगी','जाएँगे'}}[family]
@@ -51,16 +57,26 @@ def slot_checks(row,text):
             stem='लाओ'
         checks['verb']=all(w in tokens for w in stem.split())
     subject=next((r for r in SUBJECTS if r[0]==metadata.get('subject')),None)
-    if subject is not None and family!='request':
-        marker=subject[4] if family=='possession' else subject[5] if family.startswith('preference') else subject[1]
+    if subject is not None and family not in ('request','family-count'):
+        marker=subject[4] if family=='possession' else subject[5] if (
+            family.startswith('preference') or family=='affection-miss') else subject[1]
         checks['subject']=marker in tokens
     if 'object' in metadata and 'number' in metadata:
         noun=next(n for n in NOUNS if n[0]==metadata['object'])
         checks['object']=noun[2 if metadata['number']==1 else 3] in tokens
     elif family.startswith('preference'):
         checks['object']=next(h for e,h in LIKES if e==metadata['object']) in tokens
-    if 'place' in metadata:
+    if metadata.get('place'):
         checks['place']=next(h for e,h in PLACES if e==metadata['place']) in tokens
+    if 'name' in metadata:
+        hname=metadata.get('hindi_name')
+        if hname or family=='introduction':
+            hname=hname or row['target'].removeprefix('मेरा नाम ').removesuffix(' है।')
+            checks['name']=hname in tokens
+    if family=='family-count':
+        relatives={'बहन','बहनें','भाई','दोस्त','बच्चा','बच्चे'}
+        checks['relationship']=bool(tokens&expected&relatives)
+        checks['agreement']=('हैं' in tokens)==('हैं' in expected) and ('है' in tokens)==('है' in expected)
     if family.endswith('question'):
         checks['question']='?' in text
     if family.startswith('state'):
@@ -116,10 +132,13 @@ def source_probe(translator,rows):
 def main():
     cli=argparse.ArgumentParser(description=__doc__)
     cli.add_argument('--validation-only',action='store_true')
+    cli.add_argument('--experiment',type=Path,default=ROOT)
     args=cli.parse_args()
     torch.set_num_threads(3)
-    translator=TransformerTranslator.from_checkpoint(CHECKPOINT,ROOT/'tokenizer','cpu')
-    rows=[json.loads(line) for line in (ROOT/'pairs.jsonl').read_text().splitlines()]
+    root=args.experiment
+    checkpoint=root/'checkpoints/scratch/best.pt'
+    translator=TransformerTranslator.from_checkpoint(checkpoint,root/'tokenizer','cpu')
+    rows=[json.loads(line) for line in (root/'pairs.jsonl').read_text().splitlines()]
     train_vocab=set().union(*(words(r['source']) for r in rows if r['split']=='train'))
     names=['validation'] if args.validation_only else ['composition','lexical','structure']
     result={}
@@ -143,9 +162,9 @@ def main():
             if seen[family]<1:
                 gallery.append({k:row[k] for k in ('source','target','prediction','family','exact')})
                 seen[family]+=1
-        write(ROOT/'gallery.json',gallery)
-    result['checkpoint_sha256']=file_digest(CHECKPOINT)
-    write(ROOT/('validation_evaluation.json' if args.validation_only else 'test_evaluation.json'),result)
+        write(root/'gallery.json',gallery)
+    result['checkpoint_sha256']=file_digest(checkpoint)
+    write(root/('validation_evaluation.json' if args.validation_only else 'test_evaluation.json'),result)
 
 
 if __name__=='__main__':
