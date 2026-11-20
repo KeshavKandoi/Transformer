@@ -1,6 +1,7 @@
 'use strict';
 const $ = (id) => document.getElementById(id);
 let latest = null;
+let curveRows = [];
 const el = (tag, text, className) => {
   const item = document.createElement(tag);
   if (text !== undefined) item.textContent = text;
@@ -26,9 +27,11 @@ function options(select, count, name) {
 function matrix() {
   if (!latest) return;
   const a = latest.attention;
+  if (!isRecord(a) || !Array.isArray(a.source) || !Array.isArray(a.target_input) || !Array.isArray(a.target_emitted)) return false;
   const key = $('attentionType').value;
   const isMask = key.endsWith('_mask');
   const tensor = a[key];
+  if (!Array.isArray(tensor) || !tensor.length) return false;
   let values, rows, columns;
   if (isMask) {
     const isPadding = key === 'padding_mask';
@@ -37,11 +40,15 @@ function matrix() {
     columns = key === 'causal_mask' ? a.target_input : a.source;
   } else {
     options($('layer'),tensor.length,'Layer');
-    options($('head'),tensor[Number($('layer').value)].length,'Head');
-    values = tensor[Number($('layer').value)][Number($('head').value)];
+    const layer = tensor[Number($('layer').value)];
+    if (!Array.isArray(layer) || !layer.length) return false;
+    options($('head'),layer.length,'Head');
+    values = layer[Number($('head').value)];
     rows = key === 'encoder' ? a.source : a.target_input;
     columns = key === 'decoder' ? a.target_input : a.source;
   }
+  if (!Array.isArray(values) || values.length !== rows.length ||
+      !values.every(row => Array.isArray(row) && row.length === columns.length)) return false;
   $('layer').disabled = $('head').disabled = isMask;
   const table = el('table');
   const header = el('tr');
@@ -53,7 +60,7 @@ function matrix() {
     row.forEach((value,j) => {
       const number = Number(value);
       const cell = el('td',isMask ? (value?'✓':'·') : number.toFixed(2));
-      cell.style.background = `rgba(113, 228, 192, ${Math.min(.68, number * .75)})`;
+      cell.style.background = `rgba(66, 112, 211, ${Math.min(.48, number * .55)})`;
       cell.title = `${rows[i]} → ${columns[j]}: ${number.toFixed(4)}`;
       line.append(cell);
     });
@@ -61,34 +68,61 @@ function matrix() {
   });
   $('matrix').replaceChildren(table);
   $('tokens').textContent = `Source: ${a.source.join(' · ')} | Emitted: ${a.target_emitted.join(' · ')} | Decode: ${latest.attention_for}`;
+  return true;
 }
-function drawCurve(curve) {
+function drawCurve(id, curve, series) {
+  const canvas=$(id), context=canvas.getContext('2d');
+  const w=canvas.width,h=canvas.height,m=76;
+  context.clearRect(0,0,w,h);
   if (!curve.length) return;
-  const canvas=$('curve'), context=canvas.getContext('2d');
-  const w=canvas.width,h=canvas.height,m=38;
-  const high=Math.max(0.01,...curve.flatMap(r=>[r.train,r.validation]))*1.05;
-  context.font='15px system-ui';
-  context.strokeStyle='#36425d'; context.fillStyle='#a8b5ce';
+  const high=Math.max(1e-8,...curve.flatMap(row=>series.map(([key])=>row[key])))*1.05;
+  context.font='23px system-ui';
+  context.strokeStyle='#d6dce7'; context.fillStyle='#3a3a3a';
   for(let i=0;i<=4;i++) {
-    const y=h-m-i*(h-2*m)/4;
-    context.beginPath();context.moveTo(m,y);context.lineTo(w-m,y);context.stroke();
-    context.fillText((high*i/4).toFixed(2),2,y+4);
+    const y=h-42-i*(h-86)/4;
+    context.beginPath();context.moveTo(m,y);context.lineTo(w-25,y);context.stroke();
+    const value=high*i/4;
+    context.fillText(value === 0 ? '0' : value < .01 ? value.toExponential(1) : value.toFixed(2),2,y+7);
   }
-  for(const [key,color,x] of [['train','#a3b6ff',55],['validation','#71e4c0',138]]) {
-    context.strokeStyle=color;context.fillStyle=color;context.lineWidth=3;
+  series.forEach(([key,label,color], index)=>{
+    context.strokeStyle=color;context.fillStyle=color;context.lineWidth=4;
     context.beginPath();
-    curve.forEach((r,i)=>{
-      const a=m+(w-2*m)*i/Math.max(1,curve.length-1),b=h-m-(h-2*m)*r[key]/high;
-      if(i===0)context.moveTo(a,b);else context.lineTo(a,b);
+    curve.forEach((row,i)=>{
+      const x=m+(w-m-25)*i/Math.max(1,curve.length-1),y=h-42-(h-86)*row[key]/high;
+      if(i===0)context.moveTo(x,y);else context.lineTo(x,y);
     });
-    context.stroke();context.fillText(key,x,20);
-  }
-  context.fillStyle='#a8b5ce';context.fillText('Epoch 1',m,h-10);
-  context.fillText(`Epoch ${curve.at(-1).epoch}`,w-120,h-10);
+    context.stroke();context.fillText(label,m+index*220,29);
+  });
+  context.fillStyle='#3a3a3a';
+  context.fillText(`Epoch ${curve[0].epoch}`,m,h-9);
+  if (curve.length > 1) context.fillText(`Epoch ${curve.at(-1).epoch}`,w-120,h-9);
+}
+function drawProgress() {
+  const key = $('progressMetric').value;
+  const rows = curveRows.filter(row => Number.isFinite(row[key]));
+  $('progressStatus').textContent = rows.length ? 'Recorded at each completed epoch.' : 'Series unavailable.';
+  drawCurve('progress',rows,[[key,key === 'accuracy' ? 'Validation token accuracy' : 'Learning rate','#3456a4']]);
+}
+function resetOutput() {
+  latest=null;
+  $('copy').disabled=true;
+  $('prediction').replaceChildren();
+  $('matrix').replaceChildren(el('p','The heatmap will appear after translation.','hint'));
+  $('tokens').textContent='';
+  $('inspectControls').hidden=true;
 }
 async function translate(event) {
   event.preventDefault();
-  const text=$('english').value, button=$('submit');
+  const text=$('english').value.trim(), button=$('submit');
+  if (button.disabled) return;
+  resetOutput();
+  if (!text) {
+    $('status').className='warning';
+    $('status').textContent='Enter an English sentence.';
+    $('english').focus();
+    return;
+  }
+  $('clear').disabled=true;
   button.disabled=true;$('status').className='';$('status').textContent='Running checkpoint…';
   try {
     latest=await request('/api/translate',{method:'POST',headers:{'Content-Type':'application/json'},
@@ -100,22 +134,49 @@ async function translate(event) {
     $('prediction').replaceChildren();
     for(const [mode,out] of Object.entries(latest.outputs)){
       const p=el('p',out.text||'(empty prediction)','prediction-text');p.lang='hi';
-      $('prediction').append(p,el('p',`${mode.toUpperCase()} · ${out.milliseconds} ms · ${out.eos?'EOS':'length limit'}`,'minor'));
+      const latency = Number.isFinite(out.milliseconds) ? ` · ${out.milliseconds} ms` : '';
+      $('prediction').append(p,el('p',`${mode.toUpperCase()}${latency} · ${out.eos?'EOS':'length limit'}`,'minor'));
+      if (out.flags?.repetition || out.flags?.replacement_character || out.flags?.control || out.flags?.empty) {
+        $('prediction').append(el('p','This output may be unreliable.','minor warning'));
+      }
     }
-    $('status').textContent=latest.source===latest.canonical_source?'Recognized controlled pattern.':
-      `Recognized controlled pattern. Model input: ${latest.canonical_source}`;
-    $('inspectControls').hidden=false;matrix();
+    const timings = Object.entries(latest.outputs).filter(([,out])=>Number.isFinite(out.milliseconds));
+    if (timings.length) $('latency').textContent = 'Last CPU generation · ' +
+      timings.map(([mode,out])=>`${mode} ${out.milliseconds} ms`).join(' · ');
+    $('status').textContent=latest.source===latest.canonical_source?'':
+      `Model input: ${latest.canonical_source}`;
+    $('copy').disabled=!Object.values(latest.outputs).some(out=>out.text);
+    if (matrix()) $('inspectControls').hidden=false;
   }catch(err){
-    latest=null;
-    $('prediction').replaceChildren();
-    $('matrix').replaceChildren();
-    $('tokens').textContent='';
-    $('inspectControls').hidden=true;
+    resetOutput();
     $('status').className='warning';$('status').textContent=err.message;
-  }finally{button.disabled=false;}
+  }finally{button.disabled=false;$('clear').disabled=false;}
 }
 $('translateForm').addEventListener('submit',translate);
+$('english').addEventListener('keydown',event=>{
+  if (event.key==='Enter' && (event.ctrlKey || event.metaKey)) {
+    event.preventDefault();
+    $('translateForm').requestSubmit();
+  }
+});
+$('clear').addEventListener('click',()=>{
+  $('english').value='';
+  $('status').textContent='';
+  resetOutput();
+  $('english').focus();
+});
+$('copy').addEventListener('click',async()=>{
+  try {
+    await navigator.clipboard.writeText(Object.values(latest.outputs).map(out=>out.text).filter(Boolean).join('\n'));
+    $('status').className='';
+    $('status').textContent='Copied.';
+  } catch {
+    $('status').className='warning';
+    $('status').textContent='Clipboard unavailable. Select the Hindi text to copy it.';
+  }
+});
 for(const key of ['attentionType','layer','head'])$(key).addEventListener('change',matrix);
+$('progressMetric').addEventListener('change',drawProgress);
 function metricCard(value, label) {
   const item = el('article');
   item.append(el('strong', value), el('span', label));
@@ -132,9 +193,22 @@ request('/api/info').then(info=>{
     exactMetric(info.metrics, 'Synthetic in-domain validation exact · greedy', 2),
     exactMetric(info.composition, 'Held-out composition exact · greedy', 2),
     metricCard(Number.isInteger(info.parameters) ? info.parameters.toLocaleString() : 'Unavailable', 'Trainable parameters'),
-    metricCard(Number.isInteger(info.epoch) ? `Epoch ${info.epoch}` : 'Unavailable',
-               typeof info.name === 'string' ? info.name : 'Checkpoint')
+    metricCard(Number.isInteger(info.epoch) ? `Epoch ${info.epoch}` : 'Unavailable', 'Best checkpoint'),
+    metricCard(Number.isFinite(info.metrics?.chrf) ? info.metrics.chrf.toFixed(2) : 'Unavailable', 'Validation chrF2'),
+    metricCard(Number.isFinite(info.metrics?.bleu) ? info.metrics.bleu.toFixed(2) : 'Unavailable', 'Validation BLEU'),
+    metricCard(Number.isFinite(info.metrics?.eos) ? `${(100*info.metrics.eos).toFixed(2)}%` : 'Unavailable', 'Validation EOS completion')
   );
+  $('checkpoint').textContent = typeof info.name === 'string' ? `Checkpoint · ${info.name}` : 'Checkpoint identity unavailable.';
+  const config = info.architecture;
+  const dimensions = ['num_encoder_layers','num_decoder_layers','num_heads','d_model','d_ff','max_seq_len'];
+  $('dimensions').textContent = dimensions.every(key=>Number.isInteger(config?.[key])) ?
+    `${config.num_encoder_layers} encoder layers · ${config.num_decoder_layers} decoder layers · ${config.num_heads} heads × ${config.d_model/config.num_heads} · model width ${config.d_model} · feed-forward width ${config.d_ff} · ${config.max_seq_len} positions` :
+    'Checkpoint dimensions unavailable.';
+  const slots = info.metrics?.slot_errors;
+  const checks = isRecord(slots) ? Object.entries(slots)
+    .filter(([,value])=>Number.isInteger(value?.errors) && Number.isInteger(value?.n))
+    .map(([name,value])=>`${name} ${value.errors}/${value.n}`) : [];
+  $('slotErrors').textContent = checks.length ? `Failed surface checks · ${checks.join(' · ')}` : 'Surface error checks unavailable.';
   const families = asList(info.families).filter(name => typeof name === 'string');
   $('families').textContent = families.map(name=>name.replaceAll('-',' ')).join(' · ') ||
                              'Grammar coverage is unavailable for this checkpoint.';
@@ -147,9 +221,13 @@ request('/api/info').then(info=>{
     typeof row.exact === 'boolean');
   $('gallery').replaceChildren(...rows.map(row=>{
     const button=el('button',undefined,'example');button.type='button';
-    button.append(el('strong',row.source),el('span',`Prediction · ${row.prediction||'(empty)'}`),
-      el('span',`Generated reference · ${row.target}`),
-      el('span',`${row.exact?'Exact match':'Mismatch'} · ${row.family.replaceAll('-',' ')}`,row.exact?'match':'miss'));
+    const prediction = el('span',row.prediction || '(empty)');
+    const reference = el('span',row.target);
+    prediction.lang = reference.lang = 'hi';
+    button.append(el('strong',row.source),el('span','Prediction','minor'),prediction,
+      el('span','Reference','minor'),reference,
+      el('span',`${row.exact?'Exact match':'Mismatch'} · ${row.family.replaceAll('-',' ')}`,row.exact?'match':'miss'),
+      el('span','Synthetic validation','minor'));
     button.addEventListener('click',()=>{
       $('english').value=row.source;
       $('strategy').value='greedy';
@@ -159,33 +237,14 @@ request('/api/info').then(info=>{
     return button;
   }));
   if (!rows.length) $('gallery').append(el('p','Validation examples are unavailable.','minor'));
-  const curve = asList(info.curve).filter(row => isRecord(row) &&
-    ['epoch','train','validation'].every(key => Number.isFinite(row[key])));
-  if (curve.length) drawCurve(curve);
-  else $('curveStatus').textContent = 'Training and validation loss data is unavailable.';
+  curveRows = asList(info.curve).filter(row => isRecord(row) && Number.isFinite(row.epoch));
+  const losses = curveRows.filter(row => Number.isFinite(row.train) && Number.isFinite(row.validation));
+  drawCurve('curve',losses,[['train','Training','#3456a4'],['validation','Validation','#17664f']]);
+  if (!losses.length) $('curveStatus').textContent = 'Training and validation loss data is unavailable.';
+  drawProgress();
 }).catch(err=>{
   $('stats').textContent=`Could not load checkpoint information. ${err.message}`;
+  $('checkpoint').textContent='Checkpoint identity unavailable.';
   $('gallery').textContent='Validation examples are unavailable.';
+  $('dimensions').textContent='Checkpoint dimensions unavailable.';
 });
-fetch('/api/guide').then(r=>{
-  if (!r.ok) throw new Error('Could not load the interview guide.');
-  return r.text();
-}).then(text=>{
-  const guide=$('guideText');
-  guide.replaceChildren();
-  let list=null;
-  for(const raw of text.split('\n')){
-    const line=raw.trim();
-    if(line.startsWith('# '))continue;
-    if(line.startsWith('## ')){guide.append(el('h3',line.slice(3)));list=null;continue;}
-    const numbered=line.match(/^\d+\. (.+)$/);
-    const clean=(s)=>s.replaceAll('**','').replaceAll('`','');
-    if(numbered){
-      if(!list){list=el('ol');guide.append(list);}
-      list.append(el('li',clean(numbered[1])));
-    }else {
-      list=null;
-      if(line)guide.append(el('p',clean(line)));
-    }
-  }
-}).catch(()=>{$('guideText').textContent='The interview guide is unavailable.';});
