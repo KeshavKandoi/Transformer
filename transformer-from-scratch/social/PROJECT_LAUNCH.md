@@ -1,4 +1,4 @@
-# TransForge launch copy
+# Transformer launch copy
 
 ## GitHub description
 
@@ -10,17 +10,17 @@ Scratch-trained PyTorch encoder–decoder for English-to-Hindi translation, with
 
 ## Portfolio
 
-I built TransForge to trace English-to-Hindi translation from byte-level BPE through custom attention, scratch training, and autoregressive decoding. The local interface compares greedy and beam predictions and exposes real attention tensors. Frozen tests separate familiar grammar combinations from withheld structures.
+I built a Transformer to trace English-to-Hindi translation from byte-level BPE through custom attention, scratch training, and autoregressive decoding. The local interface compares greedy and beam predictions and exposes real attention tensors. Frozen tests separate familiar grammar combinations from withheld structures.
 
 ## X post
 
-I built TransForge, a PyTorch encoder–decoder for English → Hindi, and trained it from random weights. The local demo compares greedy and beam output and shows real attention maps. The repo includes reproducible synthetic tests and failure cases.
+I built a Transformer, a PyTorch encoder–decoder for English → Hindi, and trained it from random weights. The local demo compares greedy and beam output and shows real attention maps. The repo includes reproducible synthetic tests and failure cases.
 
 https://github.com/KeshavKandoi/Transformer
 
 ## X thread
 
-1. I built TransForge to follow English-to-Hindi translation from source tokens to generated output. The repo includes the exact checkpoint, tokenizer, and local demo. https://github.com/KeshavKandoi/Transformer
+1. I built a Transformer to follow English-to-Hindi translation from source tokens to generated output. The repo includes the exact checkpoint, tokenizer, and local demo. https://github.com/KeshavKandoi/Transformer
 2. I implemented the encoder, decoder, scaled dot-product attention, masks, and vocabulary projection in PyTorch. The 1.13M-parameter checkpoint started from random weights.
 3. Early corpus experiments exposed a gap between source conditioning and translation quality. Changing the source affected loss even when generation dropped names or changed relationships.
 4. On synthetic tests, greedy generation matched 1,621/1,642 held-out combinations and 330/433 withheld structures. The gap helps show what the model learned within its grammar.
@@ -28,7 +28,7 @@ https://github.com/KeshavKandoi/Transformer
 
 ## LinkedIn announcement
 
-I built TransForge, a custom PyTorch encoder–decoder for controlled English-to-Hindi translation. I implemented attention, causal and padding masks, teacher-forced training, and autoregressive decoding, then built a local interface to compare greedy and beam generation and inspect real attention tensors.
+I built a Transformer, a custom PyTorch encoder–decoder for controlled English-to-Hindi translation. I implemented attention, causal and padding masks, teacher-forced training, and autoregressive decoding, then built a local interface to compare greedy and beam generation and inspect real attention tensors.
 
 The most informative result was the difference between evaluation splits. The same checkpoint matched 1,621 of 1,642 synthetic composition examples and 330 of 433 examples from withheld structures. The repository includes the checkpoint, split recipe, and failure analysis so the results can be inspected and reproduced.
 

@@ -1,4 +1,4 @@
-# Run TransForge locally
+# Run Transformer locally
 
 Use Python 3.11 or later, Bash, and a PyTorch-compatible CPU. The browser app uses plain HTML, CSS, and JavaScript. The archive holds the original checkpoint, tokenizer, synthetic inventory, evaluation records, and training log. See the [artifact manifest](../assets/release/README.md).
 

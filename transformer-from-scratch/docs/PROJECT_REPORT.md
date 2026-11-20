@@ -1,4 +1,4 @@
-# TransForge
+# Transformer
 ## English-to-Hindi translation
 
 Technical project report · Keshav Kandoi
