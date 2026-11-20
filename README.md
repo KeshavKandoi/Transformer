@@ -1,100 +1,143 @@
-# Transformer From Scratch
+# TransForge
 
-A PyTorch encoder–decoder trained from random initialization for English-to-Hindi translation. The local demo runs the frozen checkpoint, compares greedy and beam decoding, and displays encoder, decoder, and cross-attention weights by layer and head.
+**Neural Machine Translation Engine**
 
-The model was trained on synthetic conversational patterns. Its evaluation measures performance within that domain and on deliberately withheld patterns.
+A custom encoder–decoder Transformer for English-to-Hindi neural machine translation, implemented in PyTorch and trained from random initialization. The repository connects the model implementation to a reproducible training run, frozen evaluations, and a browser interface for inspecting live predictions and attention tensors.
 
-## Quick start
+![English-to-Hindi inference through the encoder and decoder](transformer-from-scratch/assets/readme/hero.svg)
 
-Requires Python 3.11 or later, Bash, and a CPU supported by PyTorch. The web interface uses plain HTML, CSS, and JavaScript.
+## Project overview
 
-From the repository root:
+Translation models the probability of a Hindi sequence conditioned on an English sentence. TransForge encodes the whole source, then generates one target token at a time using the encoded source and the Hindi prefix. Implementing the architecture directly made it possible to test where source information enters the decoder, verify masking and generation, and separate model errors from data and evaluation problems.
 
-```bash
-cd transformer-from-scratch
-python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
-shasum -a 256 -c assets/release/SHA256SUMS
-.venv/bin/python -m zipfile -e assets/release/conversation-v2.zip experiments/conversation-v2-release
-bash scripts/run_interview_demo.sh --experiment experiments/conversation-v2-release --port 8765
-```
+## Key engineering highlights
 
-Open [localhost:8765](http://127.0.0.1:8765). Enter **Can you help me?** and select **Compare both** to see how decoding changes the output. Open **Attention Visualizer** and select cross-attention to inspect how Hindi queries attend to English keys. Use another `--port` if 8765 is occupied.
+- Custom scaled dot-product and multi-head attention with causal and padding masks, plus tests for gradients and blocked keys.
+- Encoder and decoder stacks with separate embeddings, sinusoidal positions, cross-attention, and a vocabulary projection.
+- Teacher-forced training with resumable optimizer-boundary checkpoints and tokenizer and dataset fingerprint checks.
+- Greedy and beam decoding through the local CPU server, with layer-by-layer attention, evaluation examples, and training curves.
 
-## Model and data
+## System architecture
+
+![English encoding, Hindi decoding, checkpoint evaluation, and local serving](transformer-from-scratch/assets/readme/architecture.svg)
+
+The corpus generator freezes data splits and fits BPE on the training split. Training selects a checkpoint by validation loss. Offline evaluation and local serving use that checkpoint and its tokenizer. The browser calls the Python inference server and renders its predictions and diagnostic tensors.
+
+## Inside the Transformer
+
+![Encoder self-attention, causal decoder self-attention, and cross-attention](transformer-from-scratch/assets/readme/attention-overview.svg)
+
+For each head, **Attention(Q, K, V) = softmax(QKᵀ / √dₖ)V**. The implementation masks blocked scores before softmax and gives fully masked rows zero attention. Each of the four heads projects into 32 channels. Head outputs are concatenated and projected back to width 128.
+
+| Attention | Queries | Keys and values | Visible keys |
+|---|---|---|---|
+| Encoder self-attention | English | English | Non-padding source positions |
+| Decoder self-attention | Hindi prefix | Hindi prefix | Non-padding positions up to the current query |
+| Cross-attention | Hindi prefix | Encoder states | Non-padding source positions |
+
+Cross-attention weights have shape `[batch, heads, target_length, source_length]`. Fixed sine and cosine features give token embeddings position information. Each block applies residual addition and post-layer normalization around its attention and position-wise ReLU feed-forward sublayers. At inference, the decoder starts with BOS and feeds its predictions back until EOS or the length cap. [Architecture and tensor flow](transformer-from-scratch/docs/ARCHITECTURE.md)
+
+## Model specifications
 
 | Component | Released checkpoint |
 |---|---|
+| Architecture | Encoder–decoder Transformer, post-norm |
 | Trainable parameters | 1,126,656 |
-| Encoder and decoder | Two blocks each with post-layer normalization |
-| Model width / feed-forward width | 128 / 384 |
-| Attention | Four heads, width 32 per head |
-| Embeddings and positions | Separate source and target embeddings with fixed sinusoidal positions |
-| Vocabulary / context | 874 shared byte-level BPE tokens / 64 positions |
-| Checkpoint | Epoch 11, optimizer step 1,980 |
+| Encoder / decoder blocks | 2 / 2 |
+| Attention | 4 heads per layer, 32 channels per head |
+| Hidden / feed-forward width | 128 / 384 |
+| Tokenizer | Shared byte-level BPE, 874 tokens |
+| Maximum sequence length | 64 positions |
+| Initialization | Random weights |
+| Released checkpoint | Epoch 11, optimizer step 1,980 |
+| Demo decoding | Greedy and beam search with width 4 |
 
-The encoder reads the complete English sentence. The decoder reads the Hindi prefix through causal self-attention and the encoded English through cross-attention. Training uses shifted Hindi references, cross-entropy over non-padding labels, and AdamW with warmup and inverse-square-root decay. Generation feeds back predicted tokens until EOS or the length limit.
+## Training methodology
 
-The corpus generator produced 8,597 training pairs. Normalized source strings, target strings, and semantic groups are disjoint across splits. The composition and lexical splits reuse training construction families, while the structure split reserves entire families. The [technical report](transformer-from-scratch/docs/PROJECT_REPORT.md) describes the data and training decisions.
+![Synthetic pairs, training-only tokenization, teacher forcing, and checkpoint selection](transformer-from-scratch/assets/readme/training-pipeline.svg)
 
-## Evaluation
+The generator produced 8,597 training pairs from a controlled conversational grammar. The split policy keeps normalized source and target strings and semantic groups disjoint. Composition and lexical test sets recombine familiar constructions. The structure test set withholds entire question families.
 
-These greedy results were reproduced from the frozen checkpoint. Exact match compares each entire output with one synthetic reference. Validation selected the checkpoint.
+Teacher forcing pairs the shifted Hindi prefix with next-token labels. Padding labels are excluded from cross-entropy. Backpropagation uses AdamW, gradient clipping at 1.0, and warmup followed by inverse-square-root decay. The run stopped after 16 epochs, with epoch 11 selected by validation loss. [Training configuration](transformer-from-scratch/configs/interview_training.yaml) · [Technical report](transformer-from-scratch/docs/PROJECT_REPORT.md)
 
-| Split | Exact match | chrF2 | BLEU | EOS |
+## Evaluation and results
+
+Greedy evaluation from the frozen checkpoint. Exact match compares the whole prediction against one synthetic reference. chrF2 measures character n-gram overlap, BLEU measures token n-gram overlap with a brevity penalty, and EOS counts completed generations.
+
+| Synthetic split | Exact match | chrF2 | BLEU | EOS |
 |---|---:|---:|---:|---:|
 | In-domain validation | 1,079/1,088 (99.17%) | 99.81 | 99.61 | 1,088/1,088 |
 | Held-out composition | 1,621/1,642 (98.72%) | 99.68 | 99.31 | 1,639/1,642 |
 | Held-out lexical combinations | 2,399/2,434 (98.56%) | 99.92 | 99.24 | 2,434/2,434 |
 | Withheld structures | 330/433 (76.21%) | 87.44 | 83.24 | 428/433 |
 
-| Input | Decoder | Model output |
-|---|---|---|
-| My name is Ravi. | Greedy | मेरा नाम रवि है। |
-| Can you help me? | Beam 4 | क्या तुम मेरी मदद कर सकते हो? |
-| Can you help me? | Greedy | क्या तुम मुझे फी मदद कर सकते हो? |
-| What is your name? | Greedy | उनका नाम क्या है? |
+The composition score measures recombination within the generated domain. The structure split shows a drop when entire patterns are withheld. [Evaluation history and metric sources](transformer-from-scratch/docs/EXPERIMENT_RESULTS.md)
 
-Beam search produces a grammatical help request where greedy decoding fails. Both methods change “your” to “their” in the name question. The dataset uses fixed Hindi gender and address conventions. The demo rejects English outside its recorded grammar. Small historical probes on IIT Bombay and FLORES yielded zero exact matches across 24 examples from each dataset.
+## Application showcase
 
-## Reproduce
+The translation capture shows the model’s beam-width-4 output for “Can you help me?” The attention capture uses the same prediction.
 
-Run from `transformer-from-scratch` after completing Quick start. Regenerate the synthetic scores without writing into the release directory:
-
-```bash
-release=experiments/conversation-v2-release
-.venv/bin/python scripts/evaluate_interview_model.py --experiment "$release" --output-dir runs/release-recheck --validation-only
-.venv/bin/python scripts/evaluate_interview_model.py --experiment "$release" --output-dir runs/release-recheck --domain-only
-.venv/bin/python -m pytest -q -rs
-```
-
-Prepare a fresh training directory and verify a forward and backward pass:
-
-```bash
-repro=experiments/conversation-v2-repro
-.venv/bin/python scripts/prepare_conversation_v2.py --output "$repro"
-TRANSFORMER_EXPERIMENT="$repro" bash scripts/train_conversation_v2.sh --dry-run
-```
-
-Remove `--dry-run` to train in that directory. Use a fresh path for each new preparation run. The original training run stopped after 16 epochs and 2,880 updates.
-
-## Repository guide
-
-| Path | Contents |
+| Translation | Cross-attention |
 |---|---|
-| `src/model/` | Attention, embeddings, encoder, decoder, and vocabulary projection |
-| `src/data/` | Corpus preparation, bilingual BPE, batching, and masks |
-| `src/training/` | Loss, optimizer, scheduler, and resumable checkpoints |
-| `src/inference/` | Checkpoint loading, greedy decoding, and beam search |
-| `interview_app/` | Local translation interface and attention visualizer |
-| `scripts/` and `tests/` | Reproduction commands and regression tests |
+| ![English request and its generated Hindi translation](transformer-from-scratch/assets/readme/translation.png) | ![Actual cross-attention heatmap for the generated Hindi prefix](transformer-from-scratch/assets/readme/attention.png) |
 
-[Architecture](transformer-from-scratch/docs/ARCHITECTURE.md) · [Technical report](transformer-from-scratch/docs/PROJECT_REPORT.md) · [Release verification](transformer-from-scratch/docs/FINAL_RELEASE_REPORT.md) · [Interview guide](transformer-from-scratch/docs/INTERVIEW_GUIDE.md) · [Implementation history](transformer-from-scratch/docs/IMPLEMENTATION_HISTORY.md)
+| Architecture | Training and metrics |
+|---|---|
+| ![Architecture view with checkpoint dimensions](transformer-from-scratch/assets/readme/architecture.png) | ![Recorded evaluation scores and training curves](transformer-from-scratch/assets/readme/metrics.png) |
 
-## Provenance and license
+## Engineering challenges
 
-The release archive includes the checkpoint, tokenizer, generated conversational pairs, and synthetic evaluations. It excludes IIT Bombay and FLORES data. Archive fingerprints and provenance are recorded in the [release manifest](transformer-from-scratch/assets/release/README.md). CFILT lists CC BY-NC 4.0 for its IIT Bombay corpus and notes distinct terms for compiled sources. [CFILT corpus page](https://www.cfilt.iitb.ac.in/iitb_parallel/) · [Historical corpus workflow](transformer-from-scratch/docs/CORPUS_WORKFLOW.md)
+- **Alignment and tokenization.** Earlier IIT Bombay audits found source–target mismatches. The controlled generator isolates specific grammar and agreement cases. Byte-level BPE preserves UTF-8 round trips, while Hindi still consumes more subword pieces than English in the recorded tokenizer sample.
+- **Source conditioning.** Shuffling English increased teacher-forced loss in an earlier IIT Bombay experiment, yet generated text still lost names and numbers. The released benchmark distinguishes source-conditioned likelihood from free-running translation quality.
+- **Masking and training stability.** Mask and gradient tests check future-token isolation and padding. Clipping, warmup, and validated optimizer-boundary resume cover the training path.
+- **Generation and generalization.** Beam search fixes the malformed greedy help request, but both methods turn “your” into “their” in a name question. Separate composition, lexical, and structure splits reveal failures that a pooled score would obscure. [Error analysis](transformer-from-scratch/docs/PROJECT_REPORT.md)
 
-The repository has no license file. AI assistance was used in development and release preparation. [Keshav Kandoi](https://github.com/KeshavKandoi)
+## Interactive features
 
-[Attention Is All You Need](https://arxiv.org/abs/1706.03762) · [PyTorch](https://docs.pytorch.org/docs/stable/index.html) · [Hugging Face Tokenizers](https://huggingface.co/docs/tokenizers/index) · [SacreBLEU](https://github.com/mjpost/sacrebleu)
+Translate supported English, compare decoders, and inspect per-request generation time. Select an attention type, layer, or head, then inspect the model’s token weights or masks. The interface presents checkpoint dimensions, loss and optimization curves, and a synthetic validation gallery with successes and errors. Each gallery card reruns the actual model.
+
+## Reproducibility
+
+The release archive contains the checkpoint, tokenizer, synthetic dataset, evaluation outputs, and training log. The project runs on CPU with Python 3.11 or later. Follow the setup guide for dependency installation, archive verification, local serving, tokenizer fitting, training, and evaluation. [Getting started](transformer-from-scratch/docs/GETTING_STARTED.md) · [Artifact manifest](transformer-from-scratch/assets/release/README.md)
+
+## Repository structure
+
+```text
+transformer-from-scratch/
+├── src/
+│   ├── model/       # Attention, encoder, decoder, and projection
+│   ├── data/        # Corpus preparation, tokenization, and masks
+│   ├── training/    # Optimization, metrics, and checkpoint resume
+│   └── inference/   # Checkpoint loading and decoding
+├── scripts/         # Preparation, training, evaluation, and serving
+├── interview_app/   # Local web interface
+├── assets/         # Frozen release and README visuals
+├── tests/          # Python regression and browser smoke tests
+└── docs/           # Architecture, reports, and setup
+```
+
+## Technical documentation
+
+- [Architecture and attention](transformer-from-scratch/docs/ARCHITECTURE.md)
+- [Technical project report](transformer-from-scratch/docs/PROJECT_REPORT.md)
+- [Experiment results](transformer-from-scratch/docs/EXPERIMENT_RESULTS.md)
+- [Interview guide](transformer-from-scratch/docs/INTERVIEW_GUIDE.md)
+- [Getting started](transformer-from-scratch/docs/GETTING_STARTED.md)
+
+## Research references
+
+- Vaswani et al., [Attention Is All You Need](https://arxiv.org/abs/1706.03762).
+- [PyTorch documentation](https://docs.pytorch.org/docs/stable/index.html) and [Hugging Face Tokenizers byte-level pre-tokenization](https://huggingface.co/docs/tokenizers/api/pre-tokenizers#tokenizers.pre_tokenizers.ByteLevel).
+- [SacreBLEU](https://github.com/mjpost/sacrebleu) and [IIT Bombay English–Hindi corpus](https://www.cfilt.iitb.ac.in/iitb_parallel/), used for historical experiments.
+
+## Limitations and future work
+
+The demo accepts a finite set of conversational patterns. Unseen names and constructions can be rejected or mistranslated. Longer inputs face the 64-position context and the demo’s 32-token generation cap. Fixed Hindi gender and address conventions, agreement errors, and occasional repetition limit coverage. The next evaluation should use independently reviewed paraphrases, name and role contrasts, and explicit Hindi agreement and politeness labels.
+
+## Author and links
+
+**Keshav Kandoi** · [GitHub](https://github.com/KeshavKandoi) · [Portfolio](https://keshavkandoi.me) · [LinkedIn](https://www.linkedin.com/in/keshavkandoi/)
+
+## License
+
+The repository has no license file. The release archive contains locally generated conversational data. Earlier IIT Bombay sources are separate and excluded from the release. CFILT lists CC BY-NC 4.0 for its corpus and notes that compiled sources may have distinct terms. AI assistance was used in development and release preparation. [Corpus provenance](transformer-from-scratch/docs/CORPUS_WORKFLOW.md)

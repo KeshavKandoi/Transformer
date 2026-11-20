@@ -47,7 +47,7 @@ The model components and prior experiments were preserved. The release archive c
 - The [repository README](../../README.md) covers setup, training, architecture, evaluation, examples and data provenance.
 - The [technical report](PROJECT_REPORT.md) cover the model, training, IITB audit, evaluation, serving and limitations.
 - The [interview guide](INTERVIEW_GUIDE.md) includes three timed walkthroughs and 20 questions. The [implementation history](IMPLEMENTATION_HISTORY.md) and [corpus workflow](CORPUS_WORKFLOW.md) retain historical instructions and attribution.
-- The [launch copy](../social/X_LAUNCH_POST.md) contains two X posts, a six-post thread, GitHub and portfolio descriptions, and a LinkedIn draft.
+- The [launch copy](../social/PROJECT_LAUNCH.md) contains two X posts, a six-post thread, GitHub and portfolio descriptions, and a LinkedIn draft.
 
 ## Verification
 
