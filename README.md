@@ -1,14 +1,14 @@
-# TransForge
+# Transformer
 
 **Neural Machine Translation Engine**
 
 A custom encoder–decoder Transformer for English-to-Hindi neural machine translation, implemented in PyTorch and trained from random initialization. The repository connects the model implementation to a reproducible training run, frozen evaluations, and a browser interface for inspecting live predictions and attention tensors.
 
-![English-to-Hindi inference through the encoder and decoder](transformer-from-scratch/assets/readme/hero.svg)
+![Transformer translating “Can you help me?” from English to Hindi using beam search](transformer-from-scratch/assets/readme/translation.png)
 
 ## Project overview
 
-Translation models the probability of a Hindi sequence conditioned on an English sentence. TransForge encodes the whole source, then generates one target token at a time using the encoded source and the Hindi prefix. Implementing the architecture directly made it possible to test where source information enters the decoder, verify masking and generation, and separate model errors from data and evaluation problems.
+Translation models the probability of a Hindi sequence conditioned on an English sentence. The model encodes the whole source, then generates one target token at a time using the encoded source and the Hindi prefix. Implementing the architecture directly made it possible to test where source information enters the decoder, verify masking and generation, and separate model errors from data and evaluation problems.
 
 ## Key engineering highlights
 
@@ -24,8 +24,6 @@ Translation models the probability of a Hindi sequence conditioned on an English
 The corpus generator freezes data splits and fits BPE on the training split. Training selects a checkpoint by validation loss. Offline evaluation and local serving use that checkpoint and its tokenizer. The browser calls the Python inference server and renders its predictions and diagnostic tensors.
 
 ## Inside the Transformer
-
-![Encoder self-attention, causal decoder self-attention, and cross-attention](transformer-from-scratch/assets/readme/attention-overview.svg)
 
 For each head, **Attention(Q, K, V) = softmax(QKᵀ / √dₖ)V**. The implementation masks blocked scores before softmax and gives fully masked rows zero attention. Each of the four heads projects into 32 channels. Head outputs are concatenated and projected back to width 128.
 
@@ -54,8 +52,6 @@ Cross-attention weights have shape `[batch, heads, target_length, source_length]
 
 ## Training methodology
 
-![Synthetic pairs, training-only tokenization, teacher forcing, and checkpoint selection](transformer-from-scratch/assets/readme/training-pipeline.svg)
-
 The generator produced 8,597 training pairs from a controlled conversational grammar. The split policy keeps normalized source and target strings and semantic groups disjoint. Composition and lexical test sets recombine familiar constructions. The structure test set withholds entire question families.
 
 Teacher forcing pairs the shifted Hindi prefix with next-token labels. Padding labels are excluded from cross-entropy. Backpropagation uses AdamW, gradient clipping at 1.0, and warmup followed by inverse-square-root decay. The run stopped after 16 epochs, with epoch 11 selected by validation loss. [Training configuration](transformer-from-scratch/configs/interview_training.yaml) · [Technical report](transformer-from-scratch/docs/PROJECT_REPORT.md)
@@ -75,15 +71,11 @@ The composition score measures recombination within the generated domain. The st
 
 ## Application showcase
 
-The translation capture shows the model’s beam-width-4 output for “Can you help me?” The attention capture uses the same prediction.
+The cross-attention heatmap below comes from the beam-search translation shown above. The dashboard records greedy evaluation scores and training curves.
 
-| Translation | Cross-attention |
-|---|---|
-| ![English request and its generated Hindi translation](transformer-from-scratch/assets/readme/translation.png) | ![Actual cross-attention heatmap for the generated Hindi prefix](transformer-from-scratch/assets/readme/attention.png) |
+![Cross-attention for the displayed English-to-Hindi translation](transformer-from-scratch/assets/readme/attention.png)
 
-| Architecture | Training and metrics |
-|---|---|
-| ![Architecture view with checkpoint dimensions](transformer-from-scratch/assets/readme/architecture.png) | ![Recorded evaluation scores and training curves](transformer-from-scratch/assets/readme/metrics.png) |
+![Synthetic evaluation scores and training curves](transformer-from-scratch/assets/readme/metrics.png)
 
 ## Engineering challenges
 
