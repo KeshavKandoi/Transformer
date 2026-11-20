@@ -7,10 +7,13 @@ const el = (tag, text, className) => {
   if (className) item.className = className;
   return item;
 };
+const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+const asList = value => Array.isArray(value) ? value : [];
 async function request(path, options) {
   const response = await fetch(path, options);
-  const value = await response.json();
-  if (!response.ok) throw new Error(value.error || 'Could not run inference.');
+  const value = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(typeof value?.error === 'string' ? value.error : `Server request failed (HTTP ${response.status}).`);
+  if (!isRecord(value)) throw new Error('The server returned an invalid response.');
   return value;
 }
 function options(select, count, name) {
@@ -63,7 +66,7 @@ function drawCurve(curve) {
   if (!curve.length) return;
   const canvas=$('curve'), context=canvas.getContext('2d');
   const w=canvas.width,h=canvas.height,m=38;
-  const high=Math.max(...curve.flatMap(r=>[r.train,r.validation]))*1.05;
+  const high=Math.max(0.01,...curve.flatMap(r=>[r.train,r.validation]))*1.05;
   context.font='15px system-ui';
   context.strokeStyle='#36425d'; context.fillStyle='#a8b5ce';
   for(let i=0;i<=4;i++) {
@@ -90,6 +93,10 @@ async function translate(event) {
   try {
     latest=await request('/api/translate',{method:'POST',headers:{'Content-Type':'application/json'},
                                           body:JSON.stringify({text,strategy:$('strategy').value})});
+    if (!isRecord(latest.outputs) || !Object.keys(latest.outputs).length ||
+        !Object.values(latest.outputs).every(out => isRecord(out) && typeof out.text === 'string')) {
+      throw new Error('The server returned no usable model prediction.');
+    }
     $('prediction').replaceChildren();
     for(const [mode,out] of Object.entries(latest.outputs)){
       const p=el('p',out.text||'(empty prediction)','prediction-text');p.lang='hi';
@@ -109,29 +116,61 @@ async function translate(event) {
 }
 $('translateForm').addEventListener('submit',translate);
 for(const key of ['attentionType','layer','head'])$(key).addEventListener('change',matrix);
+function metricCard(value, label) {
+  const item = el('article');
+  item.append(el('strong', value), el('span', label));
+  return item;
+}
+function exactMetric(metric, label, places) {
+  const valid = Number.isFinite(metric?.exact) && metric.exact >= 0 && metric.exact <= 1 &&
+                Number.isInteger(metric.n) && metric.n > 0;
+  return metricCard(valid ? `${(metric.exact*100).toFixed(places)}%` : 'Unavailable',
+                    valid ? `${label} · ${metric.n} rows` : label);
+}
 request('/api/info').then(info=>{
-  const value=[[`${(info.metrics.exact*100).toFixed(1)}%`,`Synthetic in-domain validation exact · ${info.metrics.n} rows`],
-    [`${(info.composition.exact*100).toFixed(2)}%`,`Held-out composition exact · ${info.composition.n} rows`],[info.parameters.toLocaleString(),'Trainable parameters'],
-    [`Epoch ${info.epoch}`,info.name]];
-  $('stats').replaceChildren(...value.map(([number,label])=>{
-    const item=el('article');item.append(el('strong',number),el('span',label));return item;
-  }));
-  $('families').textContent=info.families.map(name=>name.replaceAll('-',' ')).join(' · ');
-  const aliases=Object.entries(info.aliases).map(([key,value])=>`${key} → ${value}`);
+  $('stats').replaceChildren(
+    exactMetric(info.metrics, 'Synthetic in-domain validation exact · greedy', 2),
+    exactMetric(info.composition, 'Held-out composition exact · greedy', 2),
+    metricCard(Number.isInteger(info.parameters) ? info.parameters.toLocaleString() : 'Unavailable', 'Trainable parameters'),
+    metricCard(Number.isInteger(info.epoch) ? `Epoch ${info.epoch}` : 'Unavailable',
+               typeof info.name === 'string' ? info.name : 'Checkpoint')
+  );
+  const families = asList(info.families).filter(name => typeof name === 'string');
+  $('families').textContent = families.map(name=>name.replaceAll('-',' ')).join(' · ') ||
+                             'Grammar coverage is unavailable for this checkpoint.';
+  const aliases = isRecord(info.aliases) ? Object.entries(info.aliases)
+    .filter(([,value]) => typeof value === 'string').map(([key,value])=>`${key} → ${value}`) : [];
   $('aliases').textContent=aliases.length?`Documented input aliases · ${aliases.join(' · ')}`:'';
 
-  for(const row of info.gallery){
+  const rows = asList(info.gallery).filter(row => isRecord(row) &&
+    ['source','prediction','target','family'].every(key => typeof row[key] === 'string') &&
+    typeof row.exact === 'boolean');
+  $('gallery').replaceChildren(...rows.map(row=>{
     const button=el('button',undefined,'example');button.type='button';
     button.append(el('strong',row.source),el('span',`Prediction · ${row.prediction||'(empty)'}`),
       el('span',`Generated reference · ${row.target}`),
       el('span',`${row.exact?'Exact match':'Mismatch'} · ${row.family.replaceAll('-',' ')}`,row.exact?'match':'miss'));
-    button.addEventListener('click',()=>{$('english').value=row.source;$('translateForm').requestSubmit();
-                                          $('translateForm').scrollIntoView({block:'center'});});
-    $('gallery').append(button);
-  }
-  drawCurve(info.curve);
-}).catch(err=>{$('stats').textContent=err.message;});
-fetch('/api/guide').then(r=>r.text()).then(text=>{
+    button.addEventListener('click',()=>{
+      $('english').value=row.source;
+      $('strategy').value='greedy';
+      $('translateForm').requestSubmit();
+      $('translateForm').scrollIntoView({block:'center'});
+    });
+    return button;
+  }));
+  if (!rows.length) $('gallery').append(el('p','Validation examples are unavailable.','minor'));
+  const curve = asList(info.curve).filter(row => isRecord(row) &&
+    ['epoch','train','validation'].every(key => Number.isFinite(row[key])));
+  if (curve.length) drawCurve(curve);
+  else $('curveStatus').textContent = 'Training and validation loss data is unavailable.';
+}).catch(err=>{
+  $('stats').textContent=`Could not load checkpoint information. ${err.message}`;
+  $('gallery').textContent='Validation examples are unavailable.';
+});
+fetch('/api/guide').then(r=>{
+  if (!r.ok) throw new Error('Could not load the interview guide.');
+  return r.text();
+}).then(text=>{
   const guide=$('guideText');
   guide.replaceChildren();
   let list=null;
@@ -149,4 +188,4 @@ fetch('/api/guide').then(r=>r.text()).then(text=>{
       if(line)guide.append(el('p',clean(line)));
     }
   }
-});
+}).catch(()=>{$('guideText').textContent='The interview guide is unavailable.';});

@@ -84,7 +84,8 @@ class InterviewService:
         self.aliases = ALIASES if root.resolve()==CONVERSATION_ROOT.resolve() else None
         self.scope = {comparison_key(row['source']):row['source'] for row in grammar}
         validation=json.loads((root/'validation_evaluation.json').read_text())
-        if validation['checkpoint_sha256'] != file_digest(checkpoint):
+        checkpoint_sha256 = file_digest(checkpoint)
+        if validation['checkpoint_sha256'] != checkpoint_sha256:
             raise ValueError('Validation results belong to a different checkpoint.')
         summary=validation['validation']
         gallery_rows=summary['rows']
@@ -98,6 +99,10 @@ class InterviewService:
         info_path=root/'training/scratch/metrics.jsonl'
         curve=[json.loads(line) for line in info_path.read_text().splitlines()]
         self.info={'name':str(checkpoint.relative_to(REPO) if checkpoint.is_absolute() and checkpoint.is_relative_to(REPO) else checkpoint),
+                   'schema_version':2,'grammar_version':'v2' if self.aliases is not None else 'v1',
+                   'checkpoint_sha256':checkpoint_sha256,
+                   'tokenizer_sha256':file_digest(root/'tokenizer/tokenizer.json'),
+                   'dataset_sha256':checkpoint_data['data_identity']['input_sha256'],
                    'epoch':checkpoint_data['epoch'],'updates':checkpoint_data['global_step'],
                    'parameters':sum(p.numel() for p in self.translator.model.parameters()),
                    'vocab':self.translator.tokenizer.vocab_size,'gallery':gallery,
@@ -187,7 +192,7 @@ def handler(service):
                 value=json.loads(self.rfile.read(length))
                 if not isinstance(value,dict):
                     raise ValueError('Expected a JSON object.')
-                self.json(200,service.predict(value.get('text'),value.get('strategy','greedy')))
+                self.json(200,service.predict(value.get('text'),value.get('strategy','beam')))
             except UnsupportedInput as e:
                 self.json(422,{'error':str(e),'code':e.code})
             except (ValueError,UnicodeError) as e:

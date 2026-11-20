@@ -47,6 +47,16 @@ def test_v2_checkpoint_serves_alias_and_keeps_scope_enforcement(monkeypatch):
     torch.set_num_threads(2)
     service=InterviewService(checkpoint,ROOT)
     assert len(service.info['gallery'])==20
+    assert service.info['schema_version'] == 2
+    assert service.info['grammar_version'] == 'v2'
+    for fingerprint in ('checkpoint_sha256', 'dataset_sha256', 'tokenizer_sha256'):
+        assert len(service.info[fingerprint]) == 64
+    help_punctuated = service.predict('Can you help me?', 'beam')
+    help_plain = service.predict('can you help me', 'beam')
+    assert help_plain['canonical_source'] == help_punctuated['canonical_source'] == 'Can you help me?'
+    for result in (help_punctuated, help_plain):
+        assert result['outputs']['beam']['text'] == 'क्या तुम मेरी मदद कर सकते हो?'
+        assert result['outputs']['beam']['eos']
     canonical=service.predict('I love you.')
     alias=service.predict('LOVE YOU!')
     assert alias['canonical_source']=='I love you.'
