@@ -1,21 +1,16 @@
 # Transformer
 
-**Neural Machine Translation Engine**
+**English-to-Hindi neural machine translation in PyTorch**
 
-A custom encoder–decoder Transformer for English-to-Hindi neural machine translation, implemented in PyTorch and trained from random initialization. The repository connects the model implementation to a reproducible training run, frozen evaluations, and a browser interface for inspecting live predictions and attention tensors.
+A custom encoder–decoder Transformer trained from random initialization on synthetic conversational data. Run the frozen checkpoint locally, compare greedy and beam search, and inspect the attention tensors behind each generated sequence.
+
+[Run locally](transformer-from-scratch/docs/GETTING_STARTED.md) · [Evaluation](#evaluation-and-results) · [Technical report](transformer-from-scratch/docs/PROJECT_REPORT.md)
 
 ![Transformer translating “Can you help me?” from English to Hindi using beam search](transformer-from-scratch/assets/readme/translation.png)
 
-## Project overview
+## AI assistance
 
-Translation models the probability of a Hindi sequence conditioned on an English sentence. The model encodes the whole source, then generates one target token at a time using the encoded source and the Hindi prefix. Implementing the architecture directly made it possible to test where source information enters the decoder, verify masking and generation, and separate model errors from data and evaluation problems.
-
-## Key engineering highlights
-
-- Custom scaled dot-product and multi-head attention with causal and padding masks, plus tests for gradients and blocked keys.
-- Encoder and decoder stacks with separate embeddings, sinusoidal positions, cross-attention, and a vocabulary projection.
-- Teacher-forced training with resumable optimizer-boundary checkpoints and tokenizer and dataset fingerprint checks.
-- Greedy and beam decoding through the local CPU server, with layer-by-layer attention, evaluation examples, and training curves.
+AI tools assisted with development, debugging, and documentation. The translation demo runs the project’s custom PyTorch model locally. Its weights were trained from random initialization, and inference uses the saved checkpoint and tokenizer.
 
 ## System architecture
 
@@ -54,7 +49,7 @@ Cross-attention weights have shape `[batch, heads, target_length, source_length]
 
 The generator produced 8,597 training pairs from a controlled conversational grammar. The split policy keeps normalized source and target strings and semantic groups disjoint. Composition and lexical test sets recombine familiar constructions. The structure test set withholds entire question families.
 
-Teacher forcing pairs the shifted Hindi prefix with next-token labels. Padding labels are excluded from cross-entropy. Backpropagation uses AdamW, gradient clipping at 1.0, and warmup followed by inverse-square-root decay. The run stopped after 16 epochs, with epoch 11 selected by validation loss. [Training configuration](transformer-from-scratch/configs/interview_training.yaml) · [Technical report](transformer-from-scratch/docs/PROJECT_REPORT.md)
+Teacher forcing pairs the shifted Hindi prefix with next-token labels. Padding labels are excluded from cross-entropy. The trainer clips gradient norms at 1.0 and updates weights with AdamW using warmup followed by inverse-square-root decay. The run stopped after 16 epochs, with epoch 11 selected by validation loss. [Training configuration](transformer-from-scratch/configs/interview_training.yaml) · [Technical report](transformer-from-scratch/docs/PROJECT_REPORT.md)
 
 ## Evaluation and results
 
@@ -84,13 +79,20 @@ The cross-attention heatmap below comes from the beam-search translation shown a
 - **Masking and training stability.** Mask and gradient tests check future-token isolation and padding. Clipping, warmup, and validated optimizer-boundary resume cover the training path.
 - **Generation and generalization.** Beam search fixes the malformed greedy help request, but both methods turn “your” into “their” in a name question. Separate composition, lexical, and structure splits reveal failures that a pooled score would obscure. [Error analysis](transformer-from-scratch/docs/PROJECT_REPORT.md)
 
-## Interactive features
+## Run and reproduce
 
-Translate supported English, compare decoders, and inspect per-request generation time. Select an attention type, layer, or head, then inspect the model’s token weights or masks. The interface presents checkpoint dimensions, loss and optimization curves, and a synthetic validation gallery with successes and errors. Each gallery card reruns the actual model.
+From the repository root, use Python 3.11 or later and Bash. The demo runs on CPU.
 
-## Reproducibility
+```bash
+cd transformer-from-scratch
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+shasum -a 256 -c assets/release/SHA256SUMS
+.venv/bin/python -m zipfile -e assets/release/conversation-v2.zip experiments/conversation-v2-release
+bash scripts/run_interview_demo.sh --experiment experiments/conversation-v2-release --port 8765
+```
 
-The release archive contains the checkpoint, tokenizer, synthetic dataset, evaluation outputs, and training log. The project runs on CPU with Python 3.11 or later. Follow the setup guide for dependency installation, archive verification, local serving, tokenizer fitting, training, and evaluation. [Getting started](transformer-from-scratch/docs/GETTING_STARTED.md) · [Artifact manifest](transformer-from-scratch/assets/release/README.md)
+Open [localhost:8765](http://127.0.0.1:8765). Try **Can you help me?**, choose **Compare both**, and inspect cross-attention for the generated Hindi prefix. The archive bundles the checkpoint, tokenizer, synthetic data, evaluations, and training log. The setup guide includes commands to regenerate the scores, train in a fresh directory, and run the tests. [Getting started](transformer-from-scratch/docs/GETTING_STARTED.md) · [Artifact manifest](transformer-from-scratch/assets/release/README.md)
 
 ## Repository structure
 
@@ -132,4 +134,4 @@ The demo accepts a finite set of conversational patterns. Unseen names and const
 
 ## License
 
-The repository has no license file. The release archive contains locally generated conversational data. Earlier IIT Bombay sources are separate and excluded from the release. CFILT lists CC BY-NC 4.0 for its corpus and notes that compiled sources may have distinct terms. AI assistance was used in development and release preparation. [Corpus provenance](transformer-from-scratch/docs/CORPUS_WORKFLOW.md)
+The repository has no license file. The release archive contains locally generated conversational data. Earlier IIT Bombay sources are separate and excluded from the release. CFILT lists CC BY-NC 4.0 for its corpus and notes that compiled sources may have distinct terms. [Corpus provenance](transformer-from-scratch/docs/CORPUS_WORKFLOW.md)
