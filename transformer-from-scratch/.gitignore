@@ -10,3 +10,6 @@ artifacts/tokenizer/**/*.json
 /data/processed/**/manifest.json
 /experiments/
 /data/quality_recovery_v1/
+.DS_Store
+/test-results/
+/playwright-report/
