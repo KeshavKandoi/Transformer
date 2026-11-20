@@ -1,8 +1,10 @@
 """Serve the scratch model and its PyTorch attention tensors on localhost."""
 import argparse
 import json
+import logging
 import re
 from collections import Counter
+from dataclasses import asdict
 import sys
 import threading
 import time
@@ -14,6 +16,7 @@ import torch
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(REPO))
 from scripts.evaluate_interview_model import CHECKPOINT
+from scripts.evaluate_translations import prediction_flags
 from scripts.prepare_interview_data import ROOT
 from scripts.prepare_conversation_v2 import ROOT as CONVERSATION_ROOT, ALIASES, SEED as CONVERSATION_SEED
 from src.data.corpus import comparison_key
@@ -72,7 +75,7 @@ def canonical_input(text, scope, aliases=None):
 
 
 class InterviewService:
-    def __init__(self,checkpoint=CHECKPOINT,root=ROOT):
+    def __init__(self,checkpoint=CHECKPOINT,root=ROOT,*,version=None):
         self.translator=TransformerTranslator.from_checkpoint(checkpoint,root/'tokenizer','cpu')
         checkpoint_data=load_checkpoint(checkpoint)
         self.lock=threading.Lock()
@@ -81,7 +84,7 @@ class InterviewService:
             raise ValueError('The grammar inventory does not match the checkpoint dataset.')
         grammar = [json.loads(line) for line in inventory.read_text(encoding='utf-8').splitlines()]
         grammar = [row for row in grammar if row['split'] != 'structure']
-        self.aliases = ALIASES if root.resolve()==CONVERSATION_ROOT.resolve() else None
+        self.aliases = ALIASES if version == 'v2' or (version is None and root.resolve()==CONVERSATION_ROOT.resolve()) else None
         self.scope = {comparison_key(row['source']):row['source'] for row in grammar}
         validation=json.loads((root/'validation_evaluation.json').read_text())
         checkpoint_sha256 = file_digest(checkpoint)
@@ -104,14 +107,19 @@ class InterviewService:
                    'tokenizer_sha256':file_digest(root/'tokenizer/tokenizer.json'),
                    'dataset_sha256':checkpoint_data['data_identity']['input_sha256'],
                    'epoch':checkpoint_data['epoch'],'updates':checkpoint_data['global_step'],
-                   'parameters':sum(p.numel() for p in self.translator.model.parameters()),
+                   'parameters':sum(p.numel() for p in self.translator.model.parameters() if p.requires_grad),
+                   'architecture':asdict(self.translator.model.config),
                    'vocab':self.translator.tokenizer.vocab_size,'gallery':gallery,
                    'aliases':self.aliases or {},
                    'families':sorted({r['family'] for r in grammar if r['split']=='train'}),
                    'composition':{'n':composition['count'],'exact':composition['exact']},
                    'metrics':{'n':summary['count'],'exact':summary['exact'],'eos':summary['eos'],
-                              'chrf':summary['chrf']['score'],'bleu':summary['bleu']['score']},
-                   'curve':[{'epoch':row['epoch'],'train':row['train']['loss'],'validation':row['validation']['loss']}
+                              'chrf':summary['chrf']['score'],'bleu':summary['bleu']['score'],
+                              'slot_errors':{key: {'errors': val['n']-val['correct'], 'n': val['n']}
+                                             for key,val in summary['slots'].items()}},
+                   'curve':[{'epoch':row['epoch'],'train':row['train']['loss'],'validation':row['validation']['loss'],
+                             'learning_rate':row['train'].get('learning_rate'),
+                             'accuracy':row['validation'].get('accuracy')}
                             for row in curve]}
 
     @torch.inference_mode()
@@ -130,7 +138,8 @@ class InterviewService:
                 result=self.translator.generate([canonical],InferenceConfig(strategy=method,beam_width=4,
                                                     max_new_tokens=32,device='cpu'))[0]
                 outputs[method]={'text':result.text,'eos':result.hypothesis.reached_eos,
-                                 'milliseconds':round((time.perf_counter()-start)*1000,1)}
+                                 'milliseconds':round((time.perf_counter()-start)*1000,1),
+                                 'flags':prediction_flags(result.text)}
                 if method==models[0]:
                     attention=self.attention(result)
         return {'source':text.strip(),'canonical_source':canonical,'in_scope':True,
@@ -170,7 +179,9 @@ def handler(service):
         def do_GET(self):
             files={'/':('index.html','text/html'),'/style.css':('style.css','text/css'),
                    '/app.js':('app.js','text/javascript')}
-            if self.path=='/api/info':
+            if self.path=='/api/health':
+                self.json(200,{'status':'ready','checkpoint_sha256':service.info['checkpoint_sha256']})
+            elif self.path=='/api/info':
                 self.json(200,service.info)
             elif self.path=='/api/guide':
                 guide=(REPO/'docs/INTERVIEW_GUIDE.md').read_bytes()
@@ -197,6 +208,9 @@ def handler(service):
                 self.json(422,{'error':str(e),'code':e.code})
             except (ValueError,UnicodeError) as e:
                 self.json(400,{'error':str(e)})
+            except Exception:
+                logging.exception('Translation request failed')
+                self.json(500,{'error':'Translation failed on the server. Try again.'})
 
     return Handler
 
@@ -205,11 +219,19 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--port',type=int,default=8765)
     parser.add_argument('--version',choices=('v1','v2'),default='v2')
+    parser.add_argument('--experiment',type=Path,help='Artifact directory for the selected grammar version')
     args=parser.parse_args()
     torch.set_num_threads(3)
-    root=CONVERSATION_ROOT if args.version=='v2' else ROOT
-    service=InterviewService(root/'checkpoints/scratch/best.pt',root)
-    with ThreadingHTTPServer(('127.0.0.1',args.port),handler(service)) as server:
+    root=args.experiment or (CONVERSATION_ROOT if args.version=='v2' else ROOT)
+    try:
+        service=InterviewService(root/'checkpoints/scratch/best.pt',root,version=args.version)
+    except (OSError, ValueError, KeyError) as error:
+        parser.exit(1, f'Model startup failed: {error}\n')
+    try:
+        server=ThreadingHTTPServer(('127.0.0.1',args.port),handler(service))
+    except OSError as error:
+        parser.exit(1, f'Cannot listen on localhost port {args.port}: {error}\n')
+    with server:
         print(f'Interview Transformer at http://127.0.0.1:{server.server_port}',flush=True)
         server.serve_forever()
 

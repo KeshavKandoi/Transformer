@@ -1,46 +1,95 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Scratch Transformer · English to Hindi</title>
+<meta name="description" content="Inspect a scratch-trained PyTorch Transformer for controlled English-to-Hindi translation.">
+<title>Transformer</title>
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="/style.css">
 <script src="/app.js" defer></script>
 </head>
 <body>
-<header><a class="brand" href="#translate"><span class="mark">T</span> Scratch Transformer</a>
-<nav aria-label="Sections"><a href="#translate">Translate</a><a href="#architecture">Architecture</a><a href="#guide">Interview guide</a></nav></header>
-<main>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top"><div class="nav-inner">
+<a class="brand" href="#main"><span aria-hidden="true">T</span> Transformer</a>
+<nav aria-label="Project sections">
+<a href="#translate">Translate</a><a href="#architecture">Architecture</a><a href="#attention">Attention Visualizer</a>
+<a href="#metrics">Training &amp; Metrics</a><a href="#about">About the Project</a>
+<a class="github" href="https://github.com/KeshavKandoi/Transformer">GitHub ↗</a>
+</nav></div></header>
+<main id="main">
+<section class="hero" aria-labelledby="title">
+<p class="eyebrow">English <span aria-hidden="true">→</span> Hindi</p>
+<h1 id="title">Transformer</h1>
+<p class="lede">A PyTorch encoder–decoder trained from scratch on a limited set of English-to-Hindi conversational patterns.</p>
+<div class="actions"><a class="primary" href="#translate">Try Translation</a><a class="secondary" href="#architecture">Explore Architecture</a></div>
+</section>
 <section id="translate">
-<div class="hero"><p class="kicker">A PYTORCH TRANSLATION PROJECT</p><h1>English <span>→</span> Hindi</h1><p>Explore a custom encoder–decoder trained from random initialization on a controlled conversational grammar.</p></div>
-<div id="stats" class="stats" aria-label="Validation summary">Loading checkpoint…</div>
+<div class="section-head"><h2>Translate</h2><p class="eyebrow">English → Hindi</p></div>
 <div class="workbench">
-<form id="translateForm" class="card input">
-<div class="card-title"><label for="english">English input</label><span>EN</span></div>
-<textarea id="english" required maxlength="300" rows="4" placeholder="Enter a short English sentence, or choose an example"></textarea>
-<div class="controls"><label>Decoding <select id="strategy"><option value="beam" selected>Beam 4</option><option value="greedy">Greedy</option><option value="compare">Compare both</option></select></label><button id="submit">Translate <span>→</span></button></div>
+<form id="translateForm" class="card input" novalidate>
+<div class="card-title"><label for="english">English Input</label><button type="button" id="clear">Clear</button></div>
+<textarea id="english" required maxlength="300" rows="4" placeholder="Try: Can you help me?"></textarea>
+<div class="controls"><label for="strategy">Decoding <select id="strategy"><option value="beam">Beam 4</option><option value="greedy">Greedy</option><option value="compare">Compare both</option></select></label><button class="primary" id="submit">Translate</button></div>
+<p class="minor shortcut">Ctrl / ⌘ + Enter to translate</p>
 </form>
-<div class="card output"><div class="card-title"><span>Hindi prediction</span><span>HI</span></div>
-<div id="prediction" aria-live="polite"><p class="hint">The checkpoint’s generated output appears here.</p></div>
-<p id="status" aria-live="polite"></p></div>
+<div class="card output">
+<div class="card-title"><span>Hindi Translation</span><button type="button" id="copy" disabled>Copy output</button></div>
+<div id="prediction" aria-live="polite"><p class="hint">Your translation will appear here.</p></div>
+<p id="status" role="status"></p>
 </div>
-<p class="domain">English input → Hindi output. This demo translates only the recorded conversational grammar. Romanized Hindi and unsupported English are rejected before decoding.</p>
-<details><summary>Supported grammar families</summary><p id="families" class="minor"></p><p id="aliases" class="minor"></p></details><h2>Held-out validation examples</h2><p class="minor">Unseen during weight fitting, with synthetic validation used for checkpoint selection. The gallery records greedy predictions. Click an example to rerun it with greedy decoding.</p><div id="gallery" class="gallery"></div>
+</div>
+<p class="minor" id="checkpoint">Loading checkpoint…</p>
+<details><summary>Supported Scope</summary><p class="minor">The model accepts the English patterns listed below. It can still make mistakes on supported inputs.</p><p id="families" class="minor"></p><p id="aliases" class="minor"></p></details>
+<h3 class="subhead">Explore Examples</h3><p class="minor">These synthetic validation examples include successes and errors. Select one to translate it again with greedy decoding.</p>
+<div id="gallery" class="gallery"></div>
 </section>
 <section id="architecture">
-<h2>From tokens to translation</h2>
-<div class="flow" aria-label="Model architecture">
-<article><strong>Encode English</strong><span>BPE · source embeddings · sinusoidal positions</span><span>Encoder self-attention → feed-forward</span></article>
-<article><strong>Decode Hindi</strong><span>Target embeddings · sinusoidal positions</span><span>Masked self-attention → cross-attention → feed-forward</span></article>
-<article><strong>Generate one token</strong><span>Vocabulary logits → softmax scores</span><span>Greedy or beam → repeat until EOS</span></article>
+<div class="section-head"><h2>Architecture</h2></div>
+<p id="dimensions" class="minor">Loading checkpoint dimensions…</p>
+<div class="pipeline" aria-label="English to Hindi model pipeline">
+<article><h3>Tokenize English</h3><p>Split the sentence into subwords using bilingual BPE. Add sinusoidal positions to the token embeddings.</p></article>
+<article><h3>Encoder</h3><p>Self-attention combines information across the English sentence. A feed-forward network transforms each position.</p></article>
+<article><h3>Decoder</h3><p>Masked self-attention reads the Hindi prefix. Cross-attention reads the encoded English before the feed-forward layer.</p></article>
+<article><h3>Generate Hindi</h3><p>Score the vocabulary, choose a token, and repeat until the model emits EOS or reaches the length limit.</p></article>
 </div>
-<div class="card inspect"><h3>Attention and masks</h3><p class="minor">Run a translation to inspect its generated prefix. Attention is a diagnostic, and weights alone cannot explain a prediction.</p>
-<div id="inspectControls" hidden><label>View <select id="attentionType"><option value="encoder">Encoder self-attention</option><option value="decoder">Decoder self-attention</option><option value="cross">Cross-attention</option><option value="causal_mask">Causal mask</option><option value="padding_mask">Source padding mask</option><option value="cross_mask">Cross-attention mask</option></select></label>
-<label>Layer <select id="layer"></select></label><label>Head <select id="head"></select></label></div>
-<p id="tokens" class="minor"></p><div id="matrix" class="matrix"></div></div>
-<div class="card chart"><h3>Training and validation loss</h3><p id="curveStatus" class="minor">Masked token cross-entropy by epoch</p><canvas id="curve" width="1000" height="280" aria-label="Training and validation loss curves"></canvas></div>
+<div class="concepts">
+<article><h3>Scaled dot-product attention</h3><code>Attention(Q,K,V) = softmax(QKᵀ / √dₖ)V</code><p>Scale query–key scores by the square root of the head width. Mask disallowed keys before softmax.</p></article>
+<article><h3>Multi-head attention</h3><code>Q,K,V → parallel heads → concat → projection</code><p>Each head learns its own projections. Concatenate and project the head outputs.</p></article>
+<article><h3>Causal masking</h3><code aria-label="First query sees only the beginning token; the second query sees both tokens">BOS → [✓ ·] &nbsp; y₁ → [✓ ✓]</code><p>Each target query can attend to earlier positions and itself.</p></article>
+<article><h3>Cross-attention</h3><code>Q from Hindi · K and V from English</code><p>Each Hindi position can attend to the entire English input.</p></article>
+<article><h3>Teacher forcing</h3><code>Input [BOS, y₁, y₂] → labels [y₁, y₂, EOS]</code><p>Train on the reference prefix and predict the next token. Exclude padding from the loss.</p></article>
+<article><h3>Autoregressive inference</h3><code>BOS → ŷ₁ → ŷ₂ → … → EOS</code><p>At inference, the decoder uses its own previous predictions.</p></article>
+</div>
 </section>
-<section id="guide"><h2>Interview guide</h2><div id="guideText" class="guide">Loading guide…</div></section>
-</main><footer>Custom Transformer · local CPU inference</footer>
-</body></html>
+<section id="attention">
+<div class="section-head"><h2>Attention Visualizer</h2></div>
+<p class="minor">Translate a sentence, then choose a layer and head. The heatmap shows where each query places its attention.</p>
+<div class="card inspect">
+<div id="inspectControls" hidden>
+<label>View <select id="attentionType"><option value="encoder">Encoder self-attention</option><option value="decoder">Decoder self-attention</option><option value="cross">Cross-attention</option><option value="causal_mask">Causal mask</option><option value="padding_mask">Source padding mask</option><option value="cross_mask">Cross-attention mask</option></select></label>
+<label>Layer <select id="layer"></select></label><label>Head <select id="head"></select></label></div>
+<p id="tokens" class="minor"></p><div id="matrix" class="matrix" role="region" aria-label="Attention heatmap" tabindex="0"><p class="hint">The heatmap will appear after translation.</p></div>
+</div>
+</section>
+<section id="metrics">
+<div class="section-head"><h2>Training &amp; Metrics</h2></div>
+<p class="minor">Greedy scores on synthetic dialogue. The composition split holds out combinations of patterns seen during training.</p>
+<div id="stats" class="stats" aria-label="Validation summary">Loading checkpoint…</div>
+<div class="charts">
+<div class="card chart"><h3>Training and validation loss</h3><p id="curveStatus" class="minor">Masked token cross-entropy by epoch</p><canvas id="curve" width="1000" height="280" aria-label="Training and validation loss by epoch" role="img"></canvas></div>
+<div class="card chart"><h3>Optimization history</h3><label for="progressMetric" class="minor">Series</label> <select id="progressMetric"><option value="learning_rate">Learning rate</option><option value="accuracy">Validation token accuracy</option></select><p id="progressStatus" class="minor"></p><canvas id="progress" width="1000" height="280" aria-label="Optimization history by epoch" role="img"></canvas></div>
+</div>
+<p id="latency" class="minor">Run a translation to measure CPU generation latency.</p>
+<details><summary>Validation error checks</summary><p id="slotErrors" class="minor"></p></details>
+</section>
+<section id="about">
+<div class="section-head"><h2>About the Project</h2></div>
+<p class="about-copy">The repository includes the corpus generator, tokenizer, training code, and frozen checkpoint. The synthetic benchmark measures performance within a small conversational domain.</p>
+<a class="secondary" href="https://github.com/KeshavKandoi/Transformer">View source on GitHub ↗</a>
+</section>
+</main>
+<footer>English → Hindi · Custom PyTorch Transformer · Local CPU inference</footer>
+</body>
+</html>
