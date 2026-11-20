@@ -1,4 +1,4 @@
-# Transformer From Scratch
+# TransForge
 ## English-to-Hindi translation
 
 Technical project report · Keshav Kandoi
@@ -12,6 +12,8 @@ This project implements an encoder–decoder Transformer in PyTorch, trains its 
 Translation must preserve predicates, entities, quantities, and relationships across languages. A low teacher-forced loss and fluent output each give incomplete evidence about those requirements. The project implements the full training and generation path, measures source conditioning, evaluates structured holdouts, and exposes the actual outputs and attention tensors so failures can be inspected.
 
 ## 2. Transformer architecture
+
+![Model and serving data flow](../assets/readme/architecture.svg)
 
 
 Input strings pass through byte-level BPE. Separate source and target embedding matrices map each ID to width 128. Fixed sinusoidal positions add sequence order and support the configured 64-position context. The encoder has two blocks with bidirectional self-attention and position-wise feed-forward layers. Each of the decoder’s two blocks applies causal self-attention, cross-attention, and a feed-forward network. Residuals are followed by layer normalization. The feed-forward network expands from 128 to 384, applies ReLU, and projects back. A separate linear layer without bias projects decoder states onto the 874-token vocabulary.
@@ -35,6 +37,8 @@ The release corpus is generated locally from bilingual grammar rules. It include
 Normalized English and Hindi strings are disjoint, and semantic groups do not span splits. Composition intentionally reuses familiar construction families. The shared train-only byte-level BPE vocabulary saturated at 874 tokens against a target of 2,000. The longest encoded sequence used 27 positions including EOS. The release archive contains only synthetic records and their evaluations.
 
 ## 4. Training and checkpointing
+
+![Training and evaluation pipeline](../assets/readme/training-pipeline.svg)
 
 | Setting | Value |
 |---|---|
@@ -75,6 +79,8 @@ The release rerun reproduced all 5,597 saved synthetic records and aggregate fie
 “Can you help me?” generated **क्या तुम मुझे फी मदद कर सकते हो?** in greedy decoding and **क्या तुम मेरी मदद कर सकते हो?** with beam width four. “What is your name?” generated **उनका नाम क्या है?** with both strategies, changing the possessive. “My name is Ravi.” generated **मेरा नाम रवि है।** These are recorded outputs. The gallery includes nine validation mismatches.
 
 ## 7. Web application, API and attention
+
+The browser demo retains the short title “Transformer.”
 
 The local Python HTTP server serves a dependency-free browser interface. GET `/api/health` identifies the loaded checkpoint by hash. GET `/api/info` returns checkpoint configuration, evaluated scores, curves, scope and gallery. POST `/api/translate` takes JSON text plus a strategy and returns Hindi outputs, EOS, CPU generation latency, output flags and attention. Unsupported input returns HTTP 422. The input gate normalizes supported case, punctuation, whitespace, selected contractions and documented elliptical aliases.
 
