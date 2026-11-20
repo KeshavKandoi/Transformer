@@ -1,4 +1,4 @@
-# TransForge README redesign
+# Transformer README redesign
 
 ## Presentation
 
@@ -46,8 +46,8 @@ Scratch-trained PyTorch encoder–decoder for English-to-Hindi translation, with
 
 **X launch draft**
 
-> I built TransForge, a PyTorch encoder–decoder for English → Hindi, and trained it from random weights. The local demo compares greedy and beam output and shows real attention maps. The repo includes reproducible synthetic tests and failure cases.
+> I built a Transformer, a PyTorch encoder–decoder for English → Hindi, and trained it from random weights. The local demo compares greedy and beam output and shows real attention maps. The repo includes reproducible synthetic tests and failure cases.
 >
 > https://github.com/KeshavKandoi/Transformer
 
-An existing [TransForge website translation tool](https://github.com/LaserLloyd/TransForge) creates a discoverability conflict. The requested name remains in the draft. **HindiSeqLab** is a more distinctive candidate before public launch. The browser retains its existing short name, “Transformer.” The GitHub remote and package paths are unchanged. No push, release, or social publication was made.
+The current project title is **Transformer**, matching the browser and GitHub repository. No remote changes or publications were made.

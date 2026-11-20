@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="262" viewBox="0 0 1000 262" role="img" aria-labelledby="title desc">
+<title id="title">English to Hindi</title><desc id="desc">English input flows through a PyTorch encoder and decoder to Hindi output.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10z" fill="#7da9ff"/></marker></defs>
+<rect width="1000" height="262" rx="18" fill="#101a2e"/>
+<text x="38" y="57" fill="#9fc1ff" font-family="system-ui,sans-serif" font-size="15" font-weight="700">ENGLISH → HINDI</text>
+<text x="38" y="115" fill="#edf3ff" font-family="system-ui,sans-serif" font-size="42" font-weight="700">Neural machine translation</text>
+<rect x="38" y="153" width="214" height="64" rx="10" fill="#1c2c49" stroke="#4e6998"/>
+<text x="51" y="177" fill="#edf3ff" font-family="system-ui,sans-serif" font-size="16" font-weight="650">English source</text>
+<text x="51" y="198" fill="#b9c9e7" font-family="system-ui,sans-serif" font-size="13" font-weight="500">Byte-level BPE</text>
+<path d="M252 185 L270 185" stroke="#7da9ff" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+<rect x="273" y="153" width="214" height="64" rx="10" fill="#1c2c49" stroke="#4e6998"/>
+<text x="286" y="177" fill="#edf3ff" font-family="system-ui,sans-serif" font-size="16" font-weight="650">Encoder</text>
+<text x="286" y="198" fill="#b9c9e7" font-family="system-ui,sans-serif" font-size="13" font-weight="500">Bidirectional self-attention</text>
+<path d="M487 185 L505 185" stroke="#7da9ff" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+<rect x="508" y="153" width="214" height="64" rx="10" fill="#1c2c49" stroke="#4e6998"/>
+<text x="521" y="177" fill="#edf3ff" font-family="system-ui,sans-serif" font-size="16" font-weight="650">Decoder</text>
+<text x="521" y="198" fill="#b9c9e7" font-family="system-ui,sans-serif" font-size="13" font-weight="500">Causal and cross-attention</text>
+<path d="M722 185 L740 185" stroke="#7da9ff" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+<rect x="743" y="153" width="214" height="64" rx="10" fill="#1c2c49" stroke="#4e6998"/>
+<text x="756" y="177" fill="#edf3ff" font-family="system-ui,sans-serif" font-size="16" font-weight="650">Hindi output</text>
+<text x="756" y="198" fill="#b9c9e7" font-family="system-ui,sans-serif" font-size="13" font-weight="500">Greedy or beam decoding</text>
+</svg>

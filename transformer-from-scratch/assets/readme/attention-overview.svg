@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="245" viewBox="0 0 1000 245" role="img" aria-labelledby="title desc">
+<title id="title">Attention overview</title><desc id="desc">Vocabulary representations use encoder self-attention, causal decoder self-attention and source-conditioned cross-attention.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10z" fill="#7da9ff"/></marker></defs>
+<rect width="1000" height="245" rx="18" fill="#101a2e"/>
+<text x="38" y="45" fill="#9fc1ff" font-family="system-ui,sans-serif" font-size="19" font-weight="700">ATTENTION PATHS</text>
+<rect x="38" y="76" width="292" height="65" rx="10" fill="#1c2c49" stroke="#4e6998"/>
+<text x="51" y="100" fill="#edf3ff" font-family="system-ui,sans-serif" font-size="16" font-weight="650">Encoder self-attention</text>
+<text x="51" y="121" fill="#b9c9e7" font-family="system-ui,sans-serif" font-size="13" font-weight="500">English queries · English keys</text>
+<rect x="354" y="76" width="292" height="65" rx="10" fill="#1c2c49" stroke="#4e6998"/>
+<text x="367" y="100" fill="#edf3ff" font-family="system-ui,sans-serif" font-size="16" font-weight="650">Decoder self-attention</text>
+<text x="367" y="121" fill="#b9c9e7" font-family="system-ui,sans-serif" font-size="13" font-weight="500">Hindi queries · causal Hindi keys</text>
+<rect x="670" y="76" width="292" height="65" rx="10" fill="#1c2c49" stroke="#4e6998"/>
+<text x="683" y="100" fill="#edf3ff" font-family="system-ui,sans-serif" font-size="16" font-weight="650">Cross-attention</text>
+<text x="683" y="121" fill="#b9c9e7" font-family="system-ui,sans-serif" font-size="13" font-weight="500">Hindi queries · English keys</text>
+<text x="38" y="189" fill="#edf3ff" font-family="system-ui,sans-serif" font-size="23" font-weight="500">QKᵀ / √dₖ  →  mask  →  softmax over keys  →  weighted values</text>
+</svg>

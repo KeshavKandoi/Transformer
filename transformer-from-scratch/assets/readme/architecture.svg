@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="430" viewBox="0 0 1000 430" role="img" aria-labelledby="title desc">
+<title id="title">System architecture</title><desc id="desc">Training produces a checkpoint. Inference uses it to encode English and generate Hindi one token at a time.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10z" fill="#7da9ff"/></marker></defs>
+<rect width="1000" height="430" rx="18" fill="#101a2e"/>
+<text x="38" y="45" fill="#9fc1ff" font-family="system-ui,sans-serif" font-size="19" font-weight="700">MODEL DATA FLOW</text>
+<rect x="38" y="70" width="214" height="64" rx="10" fill="#1c2c49" stroke="#4e6998"/>
+<text x="51" y="94" fill="#edf3ff" font-family="system-ui,sans-serif" font-size="16" font-weight="650">English source</text>
+<text x="51" y="115" fill="#b9c9e7" font-family="system-ui,sans-serif" font-size="13" font-weight="500">Normalized text</text>
+<path d="M252 102 L270 102" stroke="#7da9ff" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+<rect x="273" y="70" width="214" height="64" rx="10" fill="#1c2c49" stroke="#4e6998"/>
+<text x="286" y="94" fill="#edf3ff" font-family="system-ui,sans-serif" font-size="16" font-weight="650">Source tokenizer</text>
+<text x="286" y="115" fill="#b9c9e7" font-family="system-ui,sans-serif" font-size="13" font-weight="500">Shared byte-level BPE</text>
+<path d="M487 102 L505 102" stroke="#7da9ff" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+<rect x="508" y="70" width="214" height="64" rx="10" fill="#1c2c49" stroke="#4e6998"/>
+<text x="521" y="94" fill="#edf3ff" font-family="system-ui,sans-serif" font-size="16" font-weight="650">Source embeddings</text>
+<text x="521" y="115" fill="#b9c9e7" font-family="system-ui,sans-serif" font-size="13" font-weight="500">Add sinusoidal positions</text>
+<path d="M722 102 L740 102" stroke="#7da9ff" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+<rect x="743" y="70" width="214" height="64" rx="10" fill="#1c2c49" stroke="#4e6998"/>
+<text x="756" y="94" fill="#edf3ff" font-family="system-ui,sans-serif" font-size="16" font-weight="650">Transformer encoder</text>
+<text x="756" y="115" fill="#b9c9e7" font-family="system-ui,sans-serif" font-size="13" font-weight="500">2 blocks · encoder states</text>
+<rect x="38" y="192" width="214" height="64" rx="10" fill="#1c2c49" stroke="#4e6998"/>
+<text x="51" y="216" fill="#edf3ff" font-family="system-ui,sans-serif" font-size="16" font-weight="650">Hindi prefix</text>
+<text x="51" y="237" fill="#b9c9e7" font-family="system-ui,sans-serif" font-size="13" font-weight="500">BOS + generated tokens</text>
+<path d="M252 224 L270 224" stroke="#7da9ff" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+<rect x="273" y="192" width="214" height="64" rx="10" fill="#1c2c49" stroke="#4e6998"/>
+<text x="286" y="216" fill="#edf3ff" font-family="system-ui,sans-serif" font-size="16" font-weight="650">Target embeddings</text>
+<text x="286" y="237" fill="#b9c9e7" font-family="system-ui,sans-serif" font-size="13" font-weight="500">Add sinusoidal positions</text>
+<path d="M487 224 L505 224" stroke="#7da9ff" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+<rect x="508" y="192" width="214" height="64" rx="10" fill="#1c2c49" stroke="#4e6998"/>
+<text x="521" y="216" fill="#edf3ff" font-family="system-ui,sans-serif" font-size="16" font-weight="650">Transformer decoder</text>
+<text x="521" y="237" fill="#b9c9e7" font-family="system-ui,sans-serif" font-size="13" font-weight="500">2 blocks · cross-attention</text>
+<path d="M722 224 L740 224" stroke="#7da9ff" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+<rect x="743" y="192" width="214" height="64" rx="10" fill="#1c2c49" stroke="#4e6998"/>
+<text x="756" y="216" fill="#edf3ff" font-family="system-ui,sans-serif" font-size="16" font-weight="650">Vocabulary projection</text>
+<text x="756" y="237" fill="#b9c9e7" font-family="system-ui,sans-serif" font-size="13" font-weight="500">Pick next Hindi token</text>
+<rect x="38" y="335" width="214" height="64" rx="10" fill="#1c2c49" stroke="#4e6998"/>
+<text x="51" y="359" fill="#edf3ff" font-family="system-ui,sans-serif" font-size="16" font-weight="650">Frozen checkpoint</text>
+<text x="51" y="380" fill="#b9c9e7" font-family="system-ui,sans-serif" font-size="13" font-weight="500">Model and tokenizer identity</text>
+<rect x="273" y="335" width="214" height="64" rx="10" fill="#1c2c49" stroke="#4e6998"/>
+<text x="286" y="359" fill="#edf3ff" font-family="system-ui,sans-serif" font-size="16" font-weight="650">Evaluation</text>
+<text x="286" y="380" fill="#b9c9e7" font-family="system-ui,sans-serif" font-size="13" font-weight="500">Greedy frozen splits</text>
+<rect x="508" y="335" width="214" height="64" rx="10" fill="#1c2c49" stroke="#4e6998"/>
+<text x="521" y="359" fill="#edf3ff" font-family="system-ui,sans-serif" font-size="16" font-weight="650">Local inference server</text>
+<text x="521" y="380" fill="#b9c9e7" font-family="system-ui,sans-serif" font-size="13" font-weight="500">Generate and inspect</text>
+<rect x="743" y="335" width="214" height="64" rx="10" fill="#1c2c49" stroke="#4e6998"/>
+<text x="756" y="359" fill="#edf3ff" font-family="system-ui,sans-serif" font-size="16" font-weight="650">Web application</text>
+<text x="756" y="380" fill="#b9c9e7" font-family="system-ui,sans-serif" font-size="13" font-weight="500">Hindi output · attention</text>
+<path d="M850 134 V162 H615 V189" stroke="#7da9ff" stroke-width="2" fill="none" marker-end="url(#arrow)"/><path d="M850 256 V288 H145 V259" stroke="#7da9ff" stroke-width="2" fill="none" marker-end="url(#arrow)"/><path d="M145 335 V318 H615 V332" stroke="#7da9ff" stroke-width="2" fill="none" marker-end="url(#arrow)"/><text x="365" y="311" fill="#b9c9e7" font-family="system-ui,sans-serif" font-size="13" font-weight="500">Feed the chosen token back into the prefix</text>
+<path d="M252 366 L270 366" stroke="#7da9ff" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+<path d="M722 366 L740 366" stroke="#7da9ff" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+</svg>

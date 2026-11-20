@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="235" viewBox="0 0 1000 235" role="img" aria-labelledby="title desc">
+<title id="title">Training and evaluation pipeline</title><desc id="desc">Generated pairs are split before fitting BPE. Teacher forcing trains the Transformer, and validation selects the checkpoint evaluated on held-out splits.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10z" fill="#7da9ff"/></marker></defs>
+<rect width="1000" height="235" rx="18" fill="#101a2e"/>
+<text x="38" y="44" fill="#9fc1ff" font-family="system-ui,sans-serif" font-size="19" font-weight="700">TRAINING AND EVALUATION</text>
+<rect x="38" y="73" width="214" height="66" rx="10" fill="#1c2c49" stroke="#4e6998"/>
+<text x="51" y="97" fill="#edf3ff" font-family="system-ui,sans-serif" font-size="16" font-weight="650">Grammar generator</text>
+<text x="51" y="118" fill="#b9c9e7" font-family="system-ui,sans-serif" font-size="13" font-weight="500">Build parallel pairs</text>
+<path d="M252 106 L270 106" stroke="#7da9ff" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+<rect x="273" y="73" width="214" height="66" rx="10" fill="#1c2c49" stroke="#4e6998"/>
+<text x="286" y="97" fill="#edf3ff" font-family="system-ui,sans-serif" font-size="16" font-weight="650">Frozen data splits</text>
+<text x="286" y="118" fill="#b9c9e7" font-family="system-ui,sans-serif" font-size="13" font-weight="500">Fit BPE on training only</text>
+<path d="M487 106 L505 106" stroke="#7da9ff" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+<rect x="508" y="73" width="214" height="66" rx="10" fill="#1c2c49" stroke="#4e6998"/>
+<text x="521" y="97" fill="#edf3ff" font-family="system-ui,sans-serif" font-size="16" font-weight="650">Train from scratch</text>
+<text x="521" y="118" fill="#b9c9e7" font-family="system-ui,sans-serif" font-size="13" font-weight="500">Teacher forcing · AdamW</text>
+<path d="M722 106 L740 106" stroke="#7da9ff" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+<rect x="743" y="73" width="214" height="66" rx="10" fill="#1c2c49" stroke="#4e6998"/>
+<text x="756" y="97" fill="#edf3ff" font-family="system-ui,sans-serif" font-size="16" font-weight="650">Select and evaluate</text>
+<text x="756" y="118" fill="#b9c9e7" font-family="system-ui,sans-serif" font-size="13" font-weight="500">Validation NLL → best.pt</text>
+<text x="38" y="181" fill="#edf3ff" font-family="system-ui,sans-serif" font-size="20" font-weight="500">Held-out greedy decoding → exact match, chrF2, BLEU and EOS completion</text>
+</svg>
