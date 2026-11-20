@@ -41,3 +41,11 @@ The encoder sees English subword IDs and uses bidirectional self-attention with 
 ## Limitations to say out loud
 
 The data is programmatically constructed and has no independent bilingual review. It uses one controlled wording per pair and fixed Hindi gender/address conventions. A high exact rate within those templates is evidence about the measured combinations, not general translation. One input can have multiple valid Hindi translations outside this benchmark. The lexical split tests slot recombination, with unseen English word forms separately counted. The withheld question families and general-domain probes expose failures beyond the training grammar. Attention matrices are real model diagnostics and can suggest patterns, but they do not reconstruct reasoning.
+
+## Five experiment and release questions
+
+1. **Why do the stacks have positional encodings?** Attention alone does not represent order. Fixed sine and cosine channels provide positions alongside the learned token embeddings.
+2. **When would you choose an encoder-only or decoder-only model?** An encoder-only model supports bidirectional representations for tasks such as classification. A decoder-only model conditions generation on a causal prefix. The encoder–decoder separates a fully visible English source from the causal Hindi target.
+3. **What did composition testing measure?** Greedy decoding matched 1,621 of 1,642 withheld combinations of known grammar. The separately withheld structure split matched 330 of 433. These are synthetic references with one accepted surface form.
+4. **Can an attention head explain a translation error?** It can identify where one query placed mass in one layer, but it does not measure the full effect of a token through values, residual paths, and later layers.
+5. **How do you reproduce the result?** Check archive hashes, load the checkpoint and paired tokenizer, rerun greedy evaluation on the frozen groups, and compare each output and its EOS flag. Keep the test results separate from checkpoint selection.
