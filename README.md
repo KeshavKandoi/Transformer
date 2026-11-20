@@ -1,54 +1,100 @@
-# English–Hindi Transformer from scratch
+# Transformer From Scratch
 
-This repository implements a custom PyTorch encoder–decoder Transformer, from bilingual BPE and teacher forcing through training, checkpoint resume and autoregressive inference. The implementation and phase-by-phase documentation are in [transformer-from-scratch](transformer-from-scratch/README.md).
+A PyTorch encoder–decoder trained from random initialization for English-to-Hindi translation. The local demo runs the frozen checkpoint, compares greedy and beam decoding, and displays encoder, decoder, and cross-attention weights by layer and head.
 
-## Reproduce an experiment
+The model was trained on synthetic conversational patterns. Its evaluation measures performance within that domain and on deliberately withheld patterns.
 
-Use Python 3.11 or newer. The CPU GitHub Actions workflow installs the CPU build of PyTorch and runs the full offline pytest suite.
+## Quick start
+
+Requires Python 3.11 or later, Bash, and a CPU supported by PyTorch. The web interface uses plain HTML, CSS, and JavaScript.
+
+From the repository root:
 
 ```bash
 cd transformer-from-scratch
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
+shasum -a 256 -c assets/release/SHA256SUMS
+.venv/bin/python -m zipfile -e assets/release/conversation-v2.zip experiments/conversation-v2-release
+bash scripts/run_interview_demo.sh --experiment experiments/conversation-v2-release --port 8765
+```
+
+Open [localhost:8765](http://127.0.0.1:8765). Enter **Can you help me?** and select **Compare both** to see how decoding changes the output. Open **Attention Visualizer** and select cross-attention to inspect how Hindi queries attend to English keys. Use another `--port` if 8765 is occupied.
+
+## Model and data
+
+| Component | Released checkpoint |
+|---|---|
+| Trainable parameters | 1,126,656 |
+| Encoder and decoder | Two blocks each with post-layer normalization |
+| Model width / feed-forward width | 128 / 384 |
+| Attention | Four heads, width 32 per head |
+| Embeddings and positions | Separate source and target embeddings with fixed sinusoidal positions |
+| Vocabulary / context | 874 shared byte-level BPE tokens / 64 positions |
+| Checkpoint | Epoch 11, optimizer step 1,980 |
+
+The encoder reads the complete English sentence. The decoder reads the Hindi prefix through causal self-attention and the encoded English through cross-attention. Training uses shifted Hindi references, cross-entropy over non-padding labels, and AdamW with warmup and inverse-square-root decay. Generation feeds back predicted tokens until EOS or the length limit.
+
+The corpus generator produced 8,597 training pairs. Normalized source strings, target strings, and semantic groups are disjoint across splits. The composition and lexical splits reuse training construction families, while the structure split reserves entire families. The [technical report](transformer-from-scratch/docs/PROJECT_REPORT.md) describes the data and training decisions.
+
+## Evaluation
+
+These greedy results were reproduced from the frozen checkpoint. Exact match compares each entire output with one synthetic reference. Validation selected the checkpoint.
+
+| Split | Exact match | chrF2 | BLEU | EOS |
+|---|---:|---:|---:|---:|
+| In-domain validation | 1,079/1,088 (99.17%) | 99.81 | 99.61 | 1,088/1,088 |
+| Held-out composition | 1,621/1,642 (98.72%) | 99.68 | 99.31 | 1,639/1,642 |
+| Held-out lexical combinations | 2,399/2,434 (98.56%) | 99.92 | 99.24 | 2,434/2,434 |
+| Withheld structures | 330/433 (76.21%) | 87.44 | 83.24 | 428/433 |
+
+| Input | Decoder | Model output |
+|---|---|---|
+| My name is Ravi. | Greedy | मेरा नाम रवि है। |
+| Can you help me? | Beam 4 | क्या तुम मेरी मदद कर सकते हो? |
+| Can you help me? | Greedy | क्या तुम मुझे फी मदद कर सकते हो? |
+| What is your name? | Greedy | उनका नाम क्या है? |
+
+Beam search produces a grammatical help request where greedy decoding fails. Both methods change “your” to “their” in the name question. The dataset uses fixed Hindi gender and address conventions. The demo rejects English outside its recorded grammar. Small historical probes on IIT Bombay and FLORES yielded zero exact matches across 24 examples from each dataset.
+
+## Reproduce
+
+Run from `transformer-from-scratch` after completing Quick start. Regenerate the synthetic scores without writing into the release directory:
+
+```bash
+release=experiments/conversation-v2-release
+.venv/bin/python scripts/evaluate_interview_model.py --experiment "$release" --output-dir runs/release-recheck --validation-only
+.venv/bin/python scripts/evaluate_interview_model.py --experiment "$release" --output-dir runs/release-recheck --domain-only
 .venv/bin/python -m pytest -q -rs
 ```
 
-Choose a **local, licensed** UTF-8 CSV with one aligned English source and Hindi target per row under the headers `source,target`. Consult the license for training, derivative checkpoints and redistribution of predictions before using a corpus. Record the publisher, release and acquisition URL or local source. The importer records the supplied terms and provenance, the raw SHA-256, the cleaning policy and the artifact fingerprints. It makes no dataset network requests. Keep third-party datasets, checkpoints and evaluation examples private unless redistribution is permitted.
+Prepare a fresh training directory and verify a forward and backward pass:
 
 ```bash
-run_name=en-hi-real-v1
-corpus="experiments/$run_name"
-
-.venv/bin/python scripts/import_corpus.py \
-  --input /path/to/parallel.csv --output "$corpus" \
-  --name 'Corpus name and release' --license 'License identifier or URL' \
-  --provenance 'Publisher, release and acquisition URL or local record'
-
-.venv/bin/python scripts/train.py --config configs/experiment_training.yaml \
-  --data-config configs/experiment_data.yaml \
-  --processed-dir "$corpus/processed" --tokenizer-dir "$corpus/tokenizer" \
-  --run-name "$run_name" --device cpu --dry-run
+repro=experiments/conversation-v2-repro
+.venv/bin/python scripts/prepare_conversation_v2.py --output "$repro"
+TRANSFORMER_EXPERIMENT="$repro" bash scripts/train_conversation_v2.sh --dry-run
 ```
 
-Review split sizes, rejected rows, largest duplicate cluster and tokenized lengths in `$corpus/processed/manifest.json`. Inspect paired samples for translation alignment and language quality. Then select a device and epoch budget before running training. CUDA and MPS are available when PyTorch detects them.
+Remove `--dry-run` to train in that directory. Use a fresh path for each new preparation run. The original training run stopped after 16 epochs and 2,880 updates.
 
-```bash
-.venv/bin/python scripts/train.py --config configs/experiment_training.yaml \
-  --data-config configs/experiment_data.yaml \
-  --processed-dir "$corpus/processed" --tokenizer-dir "$corpus/tokenizer" \
-  --run-name "$run_name" --device cpu --epochs 20
+## Repository guide
 
-.venv/bin/python scripts/evaluate_translations.py \
-  --checkpoint "checkpoints/$run_name/best.pt" \
-  --processed-dir "$corpus/processed" --tokenizer-dir "$corpus/tokenizer" \
-  --split test --output "runs/$run_name/generated-test" \
-  --training-metrics "runs/$run_name/metrics.jsonl" --device cpu
+| Path | Contents |
+|---|---|
+| `src/model/` | Attention, embeddings, encoder, decoder, and vocabulary projection |
+| `src/data/` | Corpus preparation, bilingual BPE, batching, and masks |
+| `src/training/` | Loss, optimizer, scheduler, and resumable checkpoints |
+| `src/inference/` | Checkpoint loading, greedy decoding, and beam search |
+| `interview_app/` | Local translation interface and attention visualizer |
+| `scripts/` and `tests/` | Reproduction commands and regression tests |
 
-.venv/bin/python -m pip freeze > "runs/$run_name/environment.txt"
-```
+[Architecture](transformer-from-scratch/docs/ARCHITECTURE.md) · [Technical report](transformer-from-scratch/docs/PROJECT_REPORT.md) · [Release verification](transformer-from-scratch/docs/FINAL_RELEASE_REPORT.md) · [Interview guide](transformer-from-scratch/docs/INTERVIEW_GUIDE.md) · [Implementation history](transformer-from-scratch/docs/IMPLEMENTATION_HISTORY.md)
 
-Choose the checkpoint and decoding settings on validation data before final test evaluation. For a quick pipeline check, use `scripts/import_corpus.py --demo --output experiments/en-hi-corpus-smoke-v1` with a fresh run name and a small CPU budget. The bundled pairs are smoke data. Translation quality requires a separate licensed corpus and an explicitly chosen training budget.
+## Provenance and license
 
-## IIT Bombay fixed-split experiment
+The release archive includes the checkpoint, tokenizer, generated conversational pairs, and synthetic evaluations. It excludes IIT Bombay and FLORES data. Archive fingerprints and provenance are recorded in the [release manifest](transformer-from-scratch/assets/release/README.md). CFILT lists CC BY-NC 4.0 for its IIT Bombay corpus and notes distinct terms for compiled sources. [CFILT corpus page](https://www.cfilt.iitb.ac.in/iitb_parallel/) · [Historical corpus workflow](transformer-from-scratch/docs/CORPUS_WORKFLOW.md)
 
-For local noncommercial research, follow the [pinned IIT Bombay workflow](transformer-from-scratch/README.md#iit-bombay-englishhindi-fixed-split-experiment). It downloads published Parquet files explicitly, preserves official split membership, and keeps downloaded text, checkpoints, and private reports under ignored paths. CFILT declares CC BY-NC 4.0 and states that compiled sources have their own licenses. [CFILT publisher page](https://www.cfilt.iitb.ac.in/iitb_parallel/) · [Pinned Hugging Face revision](https://huggingface.co/datasets/cfilt/iitb-english-hindi/tree/e104eb47979d570d3df7af4912da85f83efde6fc)
+The repository has no license file. AI assistance was used in development and release preparation. [Keshav Kandoi](https://github.com/KeshavKandoi)
+
+[Attention Is All You Need](https://arxiv.org/abs/1706.03762) · [PyTorch](https://docs.pytorch.org/docs/stable/index.html) · [Hugging Face Tokenizers](https://huggingface.co/docs/tokenizers/index) · [SacreBLEU](https://github.com/mjpost/sacrebleu)
