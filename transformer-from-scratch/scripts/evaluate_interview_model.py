@@ -133,7 +133,11 @@ def main():
     cli=argparse.ArgumentParser(description=__doc__)
     cli.add_argument('--validation-only',action='store_true')
     cli.add_argument('--experiment',type=Path,default=ROOT)
+    cli.add_argument('--output-dir',type=Path,help='Write evaluation artifacts outside the experiment directory')
+    cli.add_argument('--domain-only',action='store_true',help='Skip optional local third-party probes')
     args=cli.parse_args()
+    output=args.output_dir or args.experiment
+    output.mkdir(parents=True,exist_ok=True)
     torch.set_num_threads(3)
     root=args.experiment
     checkpoint=root/'checkpoints/scratch/best.pt'
@@ -149,7 +153,7 @@ def main():
         print(name,result[name]['exact'],result[name]['chrf']['score'],flush=True)
     if not args.validation_only:
         suite=Path('runs/transformer-v2-decisive-data-v1/evaluation_suite.json')
-        if suite.exists():
+        if not args.domain_only and suite.exists():
             for name,choices in json.loads(suite.read_text()).items():
                 general=[r for r in choices if len(translator.tokenizer.encode(r['source']))<64]
                 if general:
@@ -162,9 +166,9 @@ def main():
             if seen[family]<1:
                 gallery.append({k:row[k] for k in ('source','target','prediction','family','exact')})
                 seen[family]+=1
-        write(root/'gallery.json',gallery)
+        write(output/'gallery.json',gallery)
     result['checkpoint_sha256']=file_digest(checkpoint)
-    write(root/('validation_evaluation.json' if args.validation_only else 'test_evaluation.json'),result)
+    write(output/('validation_evaluation.json' if args.validation_only else 'test_evaluation.json'),result)
 
 
 if __name__=='__main__':
