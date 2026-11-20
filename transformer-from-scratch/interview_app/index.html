@@ -18,7 +18,7 @@
 <div class="workbench">
 <form id="translateForm" class="card input">
 <div class="card-title"><label for="english">English input</label><span>EN</span></div>
-<textarea id="english" required maxlength="300" rows="4" placeholder="Enter a short sentence, or choose an example"></textarea>
+<textarea id="english" required maxlength="300" rows="4" placeholder="Enter a short English sentence, or choose an example"></textarea>
 <div class="controls"><label>Decoding <select id="strategy"><option value="greedy">Greedy</option><option value="beam">Beam 4</option><option value="compare">Compare both</option></select></label><button id="submit">Translate <span>→</span></button></div>
 </form>
 <div class="card output"><div class="card-title"><span>Hindi prediction</span><span>HI</span></div>
@@ -26,7 +26,7 @@
 <p id="status" aria-live="polite"></p></div>
 </div>
 <p class="domain">English input → Hindi output. This demo translates only the recorded conversational grammar. Romanized Hindi and unsupported English are rejected before decoding.</p>
-<details><summary>Supported grammar families</summary><p id="families" class="minor"></p></details><h2>Held-out validation examples</h2><p class="minor">Recorded successes and errors from synthetic validation. Click an example to run the checkpoint again.</p><div id="gallery" class="gallery"></div>
+<details><summary>Supported grammar families</summary><p id="families" class="minor"></p><p id="aliases" class="minor"></p></details><h2>Held-out validation examples</h2><p class="minor">Unseen during weight fitting, with synthetic validation used for checkpoint selection. Click an example to run the checkpoint again.</p><div id="gallery" class="gallery"></div>
 </section>
 <section id="architecture">
 <h2>From tokens to translation</h2>

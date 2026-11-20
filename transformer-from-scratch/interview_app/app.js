@@ -117,6 +117,9 @@ request('/api/info').then(info=>{
     const item=el('article');item.append(el('strong',number),el('span',label));return item;
   }));
   $('families').textContent=info.families.map(name=>name.replaceAll('-',' ')).join(' · ');
+  const aliases=Object.entries(info.aliases).map(([key,value])=>`${key} → ${value}`);
+  $('aliases').textContent=aliases.length?`Documented input aliases · ${aliases.join(' · ')}`:'';
+
   for(const row of info.gallery){
     const button=el('button',undefined,'example');button.type='button';
     button.append(el('strong',row.source),el('span',`Prediction · ${row.prediction||'(empty)'}`),

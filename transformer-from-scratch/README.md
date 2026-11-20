@@ -572,3 +572,26 @@ bash scripts/run_interview_demo.sh
 Open <http://127.0.0.1:8765>. The app loads the exact checkpoint and tokenizer, runs greedy or beam inference, displays validation examples, and plots genuine attention tensors, masks and losses. Inputs outside the recorded trainable grammar receive an explicit rejection before decoding. Matching inputs are canonicalized for case, spacing and final punctuation.
 
 See [architecture](docs/ARCHITECTURE.md), [interview guide](docs/INTERVIEW_GUIDE.md), and [results](docs/EXPERIMENT_RESULTS.md). For a clean local rebuild, create `.venv` with Python 3.11+, install `requirements.txt`, run `scripts/prepare_interview_data.py`, then `bash scripts/train_interview_model.sh`. Run `scripts/evaluate_interview_model.py --validation-only` before launching the demo. Existing experiment directories are preserved; preparation requires a fresh destination. If startup reports a missing artifact, confirm `experiments/interview-transformer-v1` has its tokenizer, validation JSON and `checkpoints/scratch/best.pt`. If port 8765 is in use, pass `--port 8766`. The local lock snapshot and detailed commands are recorded in the experiment directory and run report.
+
+### Conversation v2
+
+The default demo now uses `experiments/interview-conversation-v2/checkpoints/scratch/best.pt`. The expanded grammar covers greetings, names, friendships, affection, well-being and movement questions, familiar help/call requests, and counted family relationships. It uses masculine first-person and familiar second-person defaults, with explicit third-person gender where English specifies it. It does not cover arbitrary paraphrases or Romanized Hindi.
+
+`love you` and `miss you` are documented English aliases for `I love you.` and `I miss you.`. Selected contractions and curly apostrophes normalize to recorded English patterns. The app shows the canonical source when normalization occurs, then decodes it using the actual saved model. The gallery shows both successful and failed validation predictions, evaluated after fitting and used for checkpoint selection. Test composition metrics are displayed separately.
+
+Launch the current version with `bash scripts/run_interview_demo.sh` and open <http://127.0.0.1:8765>. Use `--version v1` to inspect the preserved earlier checkpoint. The new local report is at `runs/interview-conversation-v2/REPORT.md`.
+
+For a fresh v2 experiment, from this directory:
+
+```bash
+.venv/bin/python scripts/prepare_conversation_v2.py
+.venv/bin/python scripts/benchmark_interview.py --experiment experiments/interview-conversation-v2
+bash scripts/train_conversation_v2.sh
+.venv/bin/python scripts/evaluate_interview_model.py --experiment experiments/interview-conversation-v2 --validation-only
+.venv/bin/python scripts/evaluate_interview_model.py --experiment experiments/interview-conversation-v2
+.venv/bin/python scripts/verify_conversation_v2.py
+```
+
+The preparation command requires a fresh experiment directory. The run selects the best checkpoint with validation loss before opening the frozen test results.
+
+If an older server is still listening on port 8765, use `bash scripts/run_interview_demo.sh --port 8767` and open <http://127.0.0.1:8767>. This keeps the earlier running demo available.
